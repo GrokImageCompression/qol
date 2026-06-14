@@ -1,0 +1,62 @@
+[package]
+name = "qol"
+version = "0.1.0"
+description = "Voice dictation overlay powered by Aavaaz"
+authors = ["Aaron Boxer <boxerab@protonmail.com>"]
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
+
+# Audio capture
+cpal = "0.15"
+ringbuf = "0.4"
+dasp_sample = "0.11"
+rubato = "0.16"
+
+# Networking
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Keystroke injection + active window
+enigo = "0.2"
+active-win-pos-rs = "0.9"
+
+# Serialization & utility
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+directories = "5"
+once_cell = "1"
+parking_lot = "0.12"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+# brotli 8.0.3 on crates.io pulls in alloc-no-stdlib 2.x AND 3.x and refuses
+# to unify, causing the implement_allocator! macro to fail with E0277 on
+# Rust 1.96. Master widens the range to ">=2.0.4, <4". Same fix is used in
+# ~/src/soundworm/crates/ui. Remove once brotli 8.0.4+ ships.
+[patch.crates-io]
+brotli = { git = "https://github.com/dropbox/rust-brotli", branch = "master" }
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: short
+
+jobs:
+  check:
+    name: ${{ matrix.platform.label }}
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { os: ubuntu-latest, label: ubuntu }
+          - { os: macos-latest,  label: macos }
+          - { os: windows-latest, label: windows }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ──────────────── system deps ────────────────
+      - name: Install Linux system deps
+        if: matrix.platform.label == 'ubuntu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libxdo-dev \
+            libasound2-dev \
+            libssl-dev \
+            pkg-config
+
+      # ──────────────── toolchains ────────────────
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+          shared-key: ${{ matrix.platform.label }}
+
+      # ──────────────── frontend (needed for tauri::generate_context!) ────────────────
+      - name: Install npm deps
+        run: npm ci || npm install
+
+      - name: Build frontend
+        run: npm run build
+
+      # ──────────────── checks ────────────────
+      - name: Rustfmt
+        working-directory: src-tauri
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        working-directory: src-tauri
+        run: cargo test --all-targets
+
+      - name: Build (debug)
+        working-directory: src-tauri
+        run: cargo build

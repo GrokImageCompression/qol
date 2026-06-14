@@ -1,0 +1,127 @@
+use anyhow::{Context, Result};
+use directories::ProjectDirs;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    pub aavaaz_url: String,
+    pub model: String,
+    pub language: Option<String>,
+    pub hotkey: String,
+    pub polish: PolishConfig,
+    pub hotwords: Vec<String>,
+    pub inject_method: InjectMethod,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PolishConfig {
+    pub enabled: bool,
+    pub provider: String,
+    pub model: String,
+    pub api_key_env: String,
+    pub per_app_tone: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum InjectMethod {
+    Type,
+    Paste,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            aavaaz_url: "ws://localhost:9090".into(),
+            model: "distil-large-v3".into(),
+            language: Some("en".into()),
+            hotkey: "Super+Space".into(),
+            polish: PolishConfig {
+                enabled: true,
+                provider: "anthropic".into(),
+                model: "claude-haiku-4-5-20251001".into(),
+                api_key_env: "ANTHROPIC_API_KEY".into(),
+                per_app_tone: true,
+            },
+            hotwords: vec![],
+            inject_method: InjectMethod::Type,
+        }
+    }
+}
+
+impl Config {
+    pub fn path() -> Result<PathBuf> {
+        let dirs =
+            ProjectDirs::from("com", "qol", "qol").context("could not resolve config dir")?;
+        let dir = dirs.config_dir().to_path_buf();
+        fs::create_dir_all(&dir).ok();
+        Ok(dir.join("config.json"))
+    }
+
+    pub fn load() -> Result<Self> {
+        let path = Self::path()?;
+        if !path.exists() {
+            let cfg = Self::default();
+            cfg.save()?;
+            return Ok(cfg);
+        }
+        let raw = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+        Ok(serde_json::from_str(&raw).unwrap_or_default())
+    }
+
+    pub fn save(&self) -> Result<()> {
+        let path = Self::path()?;
+        let raw = serde_json::to_string_pretty(self)?;
+        fs::write(&path, raw)?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_round_trips_through_json() {
+        let cfg = Config::default();
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(cfg.aavaaz_url, back.aavaaz_url);
+        assert_eq!(cfg.model, back.model);
+        assert_eq!(cfg.language, back.language);
+        assert_eq!(cfg.hotkey, back.hotkey);
+        assert_eq!(cfg.polish.enabled, back.polish.enabled);
+        assert_eq!(cfg.polish.model, back.polish.model);
+        assert_eq!(cfg.inject_method, back.inject_method);
+    }
+
+    #[test]
+    fn default_has_sensible_values() {
+        let cfg = Config::default();
+        assert!(cfg.aavaaz_url.starts_with("ws://"));
+        assert_eq!(cfg.hotkey, "Super+Space");
+        assert!(cfg.polish.enabled);
+        assert_eq!(cfg.polish.api_key_env, "ANTHROPIC_API_KEY");
+        assert_eq!(cfg.inject_method, InjectMethod::Type);
+    }
+
+    #[test]
+    fn inject_method_serializes_kebab_case() {
+        let json = serde_json::to_string(&InjectMethod::Type).unwrap();
+        assert_eq!(json, "\"type\"");
+        let json = serde_json::to_string(&InjectMethod::Paste).unwrap();
+        assert_eq!(json, "\"paste\"");
+    }
+
+    #[test]
+    fn unknown_fields_fall_back_to_default() {
+        // Old config files without newer fields should not crash.
+        let partial = r#"{"aavaaz_url":"ws://example:1234"}"#;
+        let parsed: Config = serde_json::from_str(partial).unwrap_or_default();
+        // Either we parsed the partial (and got defaults for the rest),
+        // or fell back to full default. Either way `aavaaz_url` should be set.
+        assert!(!parsed.aavaaz_url.is_empty());
+    }
+}

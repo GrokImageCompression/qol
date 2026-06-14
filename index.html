@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>qol — settings</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <main id="app">
+      <h1>qol</h1>
+      <p class="sub">Voice dictation powered by Aavaaz.</p>
+
+      <form id="settings">
+        <label>
+          Aavaaz WebSocket URL
+          <input name="aavaaz_url" type="text" placeholder="ws://localhost:9090" />
+        </label>
+
+        <label>
+          Model
+          <select name="model">
+            <option value="distil-large-v3">distil-large-v3 (recommended)</option>
+            <option value="large-v3">large-v3</option>
+            <option value="medium">medium</option>
+            <option value="small">small</option>
+          </select>
+        </label>
+
+        <label>
+          Language
+          <input name="language" type="text" placeholder="en" />
+        </label>
+
+        <label>
+          Push-to-talk hotkey
+          <input name="hotkey" type="text" placeholder="Super+Space" />
+        </label>
+
+        <fieldset>
+          <legend>LLM polish</legend>
+          <label class="row">
+            <input name="polish_enabled" type="checkbox" />
+            Clean up transcripts (remove fillers, fix punctuation, match app tone)
+          </label>
+          <label>
+            Polish model
+            <input name="polish_model" type="text" />
+          </label>
+          <label class="row">
+            <input name="per_app_tone" type="checkbox" />
+            Adapt tone to the focused app
+          </label>
+        </fieldset>
+
+        <label>
+          Hotwords (comma-separated)
+          <input name="hotwords" type="text" placeholder="Aavaaz,qol,WhisperLive" />
+        </label>
+
+        <div class="actions">
+          <button type="button" id="test">Test connection</button>
+          <button type="submit">Save</button>
+        </div>
+        <p id="status"></p>
+      </form>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

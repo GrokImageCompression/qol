@@ -1,0 +1,86 @@
+:root {
+  color-scheme: light dark;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  padding: 24px;
+  max-width: 640px;
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 24px;
+}
+
+.sub {
+  margin: 0 0 24px;
+  opacity: 0.7;
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+label.row {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+input[type="text"],
+select {
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 6px;
+  font: inherit;
+  background: transparent;
+  color: inherit;
+}
+
+fieldset {
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 8px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+button {
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+button[type="submit"] {
+  background: #5b6cff;
+  border-color: #5b6cff;
+  color: white;
+}
+
+#status {
+  font-size: 12px;
+  opacity: 0.8;
+  min-height: 1em;
+}
