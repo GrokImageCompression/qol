@@ -43,7 +43,13 @@ for filler removal, punctuation, and per-app tone.
 - Rust 1.77+ (`rustup toolchain install stable`)
 - Node 20+ (`pnpm` or `npm`)
 - A running Aavaaz instance at `ws://localhost:9090`
-- An `ANTHROPIC_API_KEY` env var if you want the polish pass (optional — raw transcripts inject fine without it)
+- Optional LLM polish: any **OpenAI-compatible** endpoint —
+  - `OPENAI_API_KEY` env var for OpenAI (default)
+  - Or point `base_url` at Groq, OpenRouter, Together, Cerebras, Mistral, ...
+  - Or **fully local**: Ollama (`http://localhost:11434/v1`, model `qwen2.5:7b-instruct`)
+    or llama.cpp's `--server` (`http://localhost:8080/v1`) — leave the API key
+    env var empty
+  - Or skip entirely: with polish disabled, raw transcripts inject fine
 
 ### Fedora-specific system deps
 
@@ -59,9 +65,28 @@ sudo dnf install -y \
   libxdo-devel
 ```
 
-`libxdo-devel` is needed by `enigo` on X11. On Wayland, you may also need a
-`ydotool` daemon for reliable injection (GNOME Wayland blocks synthetic input
-otherwise).
+`libxdo-devel` is needed by `enigo` on X11.
+
+### Wayland (GNOME, KDE Plasma 6 in Wayland mode)
+
+GNOME Wayland blocks synthetic X11 input, so we automatically detect Wayland
+and route injection through `ydotool`. Setup:
+
+```bash
+sudo dnf install ydotool   # or: apt install ydotool
+
+# uinput needs to be readable by your user — easiest via udev rule:
+echo 'KERNEL=="uinput", MODE="0660", GROUP="input"' | \
+  sudo tee /etc/udev/rules.d/80-uinput.rules
+sudo udevadm control --reload && sudo udevadm trigger
+sudo usermod -aG input "$USER"   # log out + back in
+
+# Start the daemon (usually as a systemd user unit):
+systemctl --user enable --now ydotoold
+```
+
+qol picks the backend automatically at startup. Look for
+`selected injection backend = Ydotool` in the logs to confirm.
 
 ## Run
 
@@ -92,9 +117,9 @@ Edit via the settings window (open from system tray), or directly at
   "hotkey": "Super+Space",
   "polish": {
     "enabled": true,
-    "provider": "anthropic",
-    "model": "claude-haiku-4-5-20251001",
-    "api_key_env": "ANTHROPIC_API_KEY",
+    "base_url": "https://api.openai.com/v1",
+    "model": "gpt-4o-mini",
+    "api_key_env": "OPENAI_API_KEY",
     "per_app_tone": true
   },
   "hotwords": ["Aavaaz", "qol", "WhisperLive"],
@@ -122,19 +147,19 @@ tests with a fake Aavaaz endpoint and a virtual audio device are a TODO.
 
 This is a scaffold. Working / stubbed:
 
-- [x] Mic capture with cheap linear resampling to 16 kHz
+- [x] Mic capture with `rubato` polyphase resampling to 16 kHz
 - [x] WebSocket session with Aavaaz/WhisperLive handshake
 - [x] LLM polish pass with per-app tone hint
-- [x] enigo-based text injection
+- [x] Streaming injection (each completed segment types as it arrives)
+- [x] Voice commands: `scratch that`, `new line`, `new paragraph`, `select all`
+- [x] Linux injection backend selector: `enigo` on X11, `ydotool` on Wayland
 - [x] Global hotkey via `tauri-plugin-global-shortcut`
+- [x] Tray menu (open settings, pause/resume, quit)
 - [x] Settings UI
-- [ ] Proper resampling (replace linear with `rubato`)
-- [ ] Wayland injection fallback (`ydotool` IPC)
-- [ ] Streaming injection (type as segments arrive vs. only at release)
 - [ ] Per-app tone profiles configurable in UI
-- [ ] Voice commands ("new line", "scratch that")
+- [ ] Tone-rolling-context across segments (consistency in long dictation)
 - [ ] Local-only polish via llama.cpp
-- [ ] Tray menu (pause, open settings, quit)
+- [ ] Integration tests with a fake Aavaaz WS server
 
 ## License
 

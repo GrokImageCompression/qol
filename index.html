@@ -38,14 +38,26 @@
         </label>
 
         <fieldset>
-          <legend>LLM polish</legend>
+          <legend>LLM polish (OpenAI-compatible)</legend>
           <label class="row">
             <input name="polish_enabled" type="checkbox" />
             Clean up transcripts (remove fillers, fix punctuation, match app tone)
           </label>
           <label>
-            Polish model
-            <input name="polish_model" type="text" />
+            Base URL
+            <input
+              name="polish_base_url"
+              type="text"
+              placeholder="https://api.openai.com/v1 — or http://localhost:11434/v1 for Ollama"
+            />
+          </label>
+          <label>
+            Model
+            <input name="polish_model" type="text" placeholder="gpt-4o-mini" />
+          </label>
+          <label>
+            API key env var (leave blank for local servers without auth)
+            <input name="polish_api_key_env" type="text" placeholder="OPENAI_API_KEY" />
           </label>
           <label class="row">
             <input name="per_app_tone" type="checkbox" />

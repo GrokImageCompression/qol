@@ -3,9 +3,10 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::audio::CaptureHandle;
+use crate::commands::{parse as parse_command, Command};
 use crate::config::Config;
 use crate::inject::{active_app_name, InjectorHandle};
-use crate::polish::polish;
+use crate::polish::{polish, PolishContext};
 use crate::transport::run_session;
 
 pub struct Session {
@@ -34,23 +35,58 @@ impl Session {
         let inject_method = cfg.inject_method;
         let app_for_polish = app_context.clone();
         let injector_for_collector = injector.clone();
+        // Rolling polished context — fresh per session so prior dictations
+        // don't bleed into a new one's tone.
+        let polish_ctx = PolishContext::new();
+
         let collector = tokio::spawn(async move {
-            // Stream each completed segment: polish, then inject immediately.
-            // Insert a leading space between segments so words don't collide.
-            let mut first = true;
+            // Track how many chars the previous Text injection contributed
+            // so "scratch that" can erase exactly that segment.
+            let mut last_injected_len: usize = 0;
+            let mut first_text = true;
+
             while let Some(seg) = seg_rx.recv().await {
                 let raw = seg.text.trim().to_string();
                 if raw.is_empty() {
                     continue;
                 }
-                let polished = polish(&polish_cfg, &raw, app_for_polish.as_deref()).await;
-                let to_inject = if first {
-                    first = false;
-                    polished
-                } else {
-                    format!(" {polished}")
-                };
-                injector_for_collector.inject(to_inject, inject_method);
+                match parse_command(&raw) {
+                    Command::Text(text) => {
+                        let polished = polish(
+                            &polish_cfg,
+                            &text,
+                            app_for_polish.as_deref(),
+                            &polish_ctx,
+                        )
+                        .await;
+                        let to_inject = if first_text {
+                            first_text = false;
+                            polished
+                        } else {
+                            format!(" {polished}")
+                        };
+                        last_injected_len = to_inject.chars().count();
+                        injector_for_collector.inject(to_inject, inject_method);
+                    }
+                    Command::Newline => {
+                        injector_for_collector.newline();
+                        last_injected_len = 1;
+                        first_text = true;
+                    }
+                    Command::Paragraph => {
+                        injector_for_collector.paragraph();
+                        last_injected_len = 2;
+                        first_text = true;
+                    }
+                    Command::ScratchLast => {
+                        injector_for_collector.backspace(last_injected_len);
+                        last_injected_len = 0;
+                    }
+                    Command::SelectAll => {
+                        injector_for_collector.select_all();
+                        last_injected_len = 0;
+                    }
+                }
             }
         });
 

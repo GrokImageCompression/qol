@@ -18,8 +18,16 @@ pub struct Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PolishConfig {
     pub enabled: bool,
-    pub provider: String,
+    /// OpenAI-compatible API base, e.g.:
+    ///   - `https://api.openai.com/v1`
+    ///   - `https://api.groq.com/openai/v1`
+    ///   - `https://openrouter.ai/api/v1`
+    ///   - `http://localhost:11434/v1` (Ollama)
+    ///   - `http://localhost:8080/v1`  (llama.cpp server, vLLM)
+    pub base_url: String,
     pub model: String,
+    /// Name of the env var holding the API key. Leave the env var unset for
+    /// local servers (Ollama, llama.cpp) that don't require auth.
     pub api_key_env: String,
     pub per_app_tone: bool,
 }
@@ -40,9 +48,9 @@ impl Default for Config {
             hotkey: "Super+Space".into(),
             polish: PolishConfig {
                 enabled: true,
-                provider: "anthropic".into(),
-                model: "claude-haiku-4-5-20251001".into(),
-                api_key_env: "ANTHROPIC_API_KEY".into(),
+                base_url: "https://api.openai.com/v1".into(),
+                model: "gpt-4o-mini".into(),
+                api_key_env: "OPENAI_API_KEY".into(),
                 per_app_tone: true,
             },
             hotwords: vec![],
@@ -103,7 +111,8 @@ mod tests {
         assert!(cfg.aavaaz_url.starts_with("ws://"));
         assert_eq!(cfg.hotkey, "Super+Space");
         assert!(cfg.polish.enabled);
-        assert_eq!(cfg.polish.api_key_env, "ANTHROPIC_API_KEY");
+        assert!(cfg.polish.base_url.ends_with("/v1"));
+        assert_eq!(cfg.polish.api_key_env, "OPENAI_API_KEY");
         assert_eq!(cfg.inject_method, InjectMethod::Type);
     }
 

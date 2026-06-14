@@ -4,6 +4,7 @@
 )]
 
 mod audio;
+mod commands;
 mod config;
 mod inject;
 mod polish;

@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 interface PolishConfig {
   enabled: boolean;
-  provider: string;
+  base_url: string;
   model: string;
   api_key_env: string;
   per_app_tone: boolean;
@@ -33,7 +33,9 @@ function fill(cfg: Config) {
   (form.elements.namedItem("language") as HTMLInputElement).value = cfg.language ?? "";
   (form.elements.namedItem("hotkey") as HTMLInputElement).value = cfg.hotkey;
   (form.elements.namedItem("polish_enabled") as HTMLInputElement).checked = cfg.polish.enabled;
+  (form.elements.namedItem("polish_base_url") as HTMLInputElement).value = cfg.polish.base_url;
   (form.elements.namedItem("polish_model") as HTMLInputElement).value = cfg.polish.model;
+  (form.elements.namedItem("polish_api_key_env") as HTMLInputElement).value = cfg.polish.api_key_env;
   (form.elements.namedItem("per_app_tone") as HTMLInputElement).checked = cfg.polish.per_app_tone;
   (form.elements.namedItem("hotwords") as HTMLInputElement).value = cfg.hotwords.join(", ");
 }
@@ -55,7 +57,9 @@ function collect(prev: Config): Config {
     polish: {
       ...prev.polish,
       enabled: data.get("polish_enabled") === "on",
+      base_url: data.get("polish_base_url") as string,
       model: data.get("polish_model") as string,
+      api_key_env: data.get("polish_api_key_env") as string,
       per_app_tone: data.get("per_app_tone") === "on",
     },
   };

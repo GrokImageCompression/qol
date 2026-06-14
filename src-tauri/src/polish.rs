@@ -1,43 +1,99 @@
+//! LLM polish pass via the OpenAI-compatible Chat Completions API.
+//!
+//! Works against any provider that speaks the `/v1/chat/completions` shape —
+//! OpenAI, Groq, OpenRouter, Together, Cerebras, Mistral, local Ollama,
+//! llama.cpp's server, vLLM. Configured by `base_url`, `model`, and an
+//! optional env var holding a bearer token.
+//!
+//! To keep tone consistent across a long dictation we maintain a rolling
+//! window of previously-polished output and include it in the system prompt
+//! so the model continues in the same register.
+
 use anyhow::{Context, Result};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::config::PolishConfig;
 
+const CONTEXT_CHAR_CAP: usize = 2000;
+
 #[derive(Serialize)]
-struct AnthropicReq<'a> {
+struct ChatReq<'a> {
     model: &'a str,
+    messages: Vec<ChatMsg<'a>>,
+    temperature: f32,
     max_tokens: u32,
-    system: String,
-    messages: Vec<AnthropicMsg<'a>>,
 }
 
 #[derive(Serialize)]
-struct AnthropicMsg<'a> {
+struct ChatMsg<'a> {
     role: &'a str,
     content: String,
 }
 
 #[derive(Deserialize)]
-struct AnthropicResp {
-    content: Vec<AnthropicBlock>,
+struct ChatResp {
+    choices: Vec<Choice>,
 }
 
 #[derive(Deserialize)]
-struct AnthropicBlock {
-    #[serde(rename = "type")]
-    kind: String,
-    #[serde(default)]
-    text: String,
+struct Choice {
+    message: RespMsg,
 }
 
-/// Take raw transcript text and rewrite it for the active app's tone.
-/// Returns the original text on any failure — never blocks dictation.
-pub async fn polish(cfg: &PolishConfig, raw: &str, app: Option<&str>) -> String {
+#[derive(Deserialize)]
+struct RespMsg {
+    #[serde(default)]
+    content: String,
+}
+
+/// Sliding window of previously-polished output for one dictation session.
+#[derive(Clone, Default)]
+pub struct PolishContext {
+    inner: Arc<Mutex<String>>,
+}
+
+impl PolishContext {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn snapshot(&self) -> String {
+        self.inner.lock().clone()
+    }
+
+    pub fn append(&self, polished: &str) {
+        let mut g = self.inner.lock();
+        if !g.is_empty() {
+            g.push(' ');
+        }
+        g.push_str(polished.trim());
+        if g.len() > CONTEXT_CHAR_CAP {
+            let cut = g.len() - CONTEXT_CHAR_CAP;
+            let trim_to = g[cut..]
+                .find(char::is_whitespace)
+                .map(|i| cut + i + 1)
+                .unwrap_or(cut);
+            *g = g[trim_to..].to_string();
+        }
+    }
+}
+
+pub async fn polish(
+    cfg: &PolishConfig,
+    raw: &str,
+    app: Option<&str>,
+    ctx: &PolishContext,
+) -> String {
     if !cfg.enabled || raw.trim().is_empty() {
         return raw.to_string();
     }
-    match polish_inner(cfg, raw, app).await {
-        Ok(out) => out,
+    match polish_inner(cfg, raw, app, ctx).await {
+        Ok(out) => {
+            ctx.append(&out);
+            out
+        }
         Err(e) => {
             tracing::warn!(error = ?e, "polish failed, falling back to raw");
             raw.to_string()
@@ -45,11 +101,8 @@ pub async fn polish(cfg: &PolishConfig, raw: &str, app: Option<&str>) -> String 
     }
 }
 
-async fn polish_inner(cfg: &PolishConfig, raw: &str, app: Option<&str>) -> Result<String> {
-    let api_key = std::env::var(&cfg.api_key_env)
-        .with_context(|| format!("missing env {}", cfg.api_key_env))?;
-
-    let tone_hint = match app.map(str::to_ascii_lowercase).as_deref() {
+fn tone_hint_for(app: Option<&str>) -> &'static str {
+    match app.map(str::to_ascii_lowercase).as_deref() {
         Some("slack") | Some("discord") | Some("telegram") => "casual chat",
         Some("mail") | Some("thunderbird") | Some("outlook") | Some("gmail") => {
             "professional email"
@@ -58,41 +111,176 @@ async fn polish_inner(cfg: &PolishConfig, raw: &str, app: Option<&str>) -> Resul
             "terse, code-friendly"
         }
         _ => "natural prose",
-    };
+    }
+}
 
-    let system = format!(
-        "You clean up dictated speech. Remove filler words (um, uh, like, you know). \
-         Fix punctuation and capitalization. Preserve meaning exactly. \
-         Match this tone: {tone_hint}. Output ONLY the cleaned text, no preamble."
-    );
+fn build_system_prompt(tone_hint: &str, prior: &str) -> String {
+    if prior.is_empty() {
+        format!(
+            "You clean up dictated speech. Remove filler words (um, uh, like, you know). \
+             Fix punctuation and capitalization. Preserve meaning exactly. \
+             Match this tone: {tone_hint}. Output ONLY the cleaned text, no preamble."
+        )
+    } else {
+        format!(
+            "You clean up dictated speech. Remove filler words (um, uh, like, you know). \
+             Fix punctuation and capitalization. Preserve meaning exactly. \
+             Match this tone: {tone_hint}. \
+             Continue in the same style and register as the prior text below. \
+             Do NOT repeat or summarize the prior text. \
+             Output ONLY the cleaned version of the new utterance.\n\n\
+             Prior text (for style continuity):\n{prior}"
+        )
+    }
+}
 
-    let body = AnthropicReq {
+async fn polish_inner(
+    cfg: &PolishConfig,
+    raw: &str,
+    app: Option<&str>,
+    ctx: &PolishContext,
+) -> Result<String> {
+    let prior = ctx.snapshot();
+    let tone_hint = tone_hint_for(app);
+    let system = build_system_prompt(tone_hint, &prior);
+
+    let body = ChatReq {
         model: &cfg.model,
+        messages: vec![
+            ChatMsg {
+                role: "system",
+                content: system,
+            },
+            ChatMsg {
+                role: "user",
+                content: raw.to_string(),
+            },
+        ],
+        temperature: 0.0,
         max_tokens: 1024,
-        system,
-        messages: vec![AnthropicMsg {
-            role: "user",
-            content: raw.to_string(),
-        }],
     };
 
-    let client = reqwest::Client::new();
-    let resp: AnthropicResp = client
-        .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", api_key)
-        .header("anthropic-version", "2023-06-01")
-        .json(&body)
+    let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
+    let mut req = reqwest::Client::new().post(&url).json(&body);
+
+    // Bearer auth only if the configured env var is set. Lets local servers
+    // (Ollama, llama.cpp) work with no key configured.
+    if !cfg.api_key_env.is_empty() {
+        if let Ok(key) = std::env::var(&cfg.api_key_env) {
+            if !key.is_empty() {
+                req = req.bearer_auth(key);
+            }
+        }
+    }
+
+    let resp: ChatResp = req
         .send()
-        .await?
+        .await
+        .with_context(|| format!("POST {url}"))?
         .error_for_status()?
         .json()
         .await?;
 
     let text = resp
-        .content
+        .choices
         .into_iter()
-        .filter(|b| b.kind == "text")
-        .map(|b| b.text)
-        .collect::<String>();
+        .next()
+        .map(|c| c.message.content)
+        .unwrap_or_default();
     Ok(text.trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn context_starts_empty() {
+        let ctx = PolishContext::new();
+        assert!(ctx.snapshot().is_empty());
+    }
+
+    #[test]
+    fn append_joins_with_space() {
+        let ctx = PolishContext::new();
+        ctx.append("Hello there.");
+        ctx.append("How are you?");
+        assert_eq!(ctx.snapshot(), "Hello there. How are you?");
+    }
+
+    #[test]
+    fn append_trims_inner_whitespace() {
+        let ctx = PolishContext::new();
+        ctx.append("  one  ");
+        ctx.append("\ttwo\n");
+        assert_eq!(ctx.snapshot(), "one two");
+    }
+
+    #[test]
+    fn cap_keeps_recent_text() {
+        let ctx = PolishContext::new();
+        for i in 0..30 {
+            ctx.append(&format!("chunk-{i:02} ").repeat(10));
+        }
+        let snap = ctx.snapshot();
+        assert!(
+            snap.len() <= CONTEXT_CHAR_CAP + 200,
+            "snap len {} exceeded cap {}",
+            snap.len(),
+            CONTEXT_CHAR_CAP
+        );
+        assert!(snap.contains("chunk-29"));
+        assert!(!snap.contains("chunk-00"));
+    }
+
+    #[test]
+    fn cap_cuts_at_word_boundary() {
+        let ctx = PolishContext::new();
+        ctx.append(&"alpha bravo charlie delta echo ".repeat(200));
+        let snap = ctx.snapshot();
+        let first_word = snap.split_whitespace().next().unwrap();
+        assert!(
+            ["alpha", "bravo", "charlie", "delta", "echo"].contains(&first_word),
+            "got partial word {first_word:?}"
+        );
+    }
+
+    #[test]
+    fn tone_hint_per_app() {
+        assert_eq!(tone_hint_for(Some("Slack")), "casual chat");
+        assert_eq!(tone_hint_for(Some("Thunderbird")), "professional email");
+        assert_eq!(tone_hint_for(Some("code - OSS")), "terse, code-friendly");
+        assert_eq!(tone_hint_for(Some("Firefox")), "natural prose");
+        assert_eq!(tone_hint_for(None), "natural prose");
+    }
+
+    #[test]
+    fn system_prompt_includes_prior_when_present() {
+        let s = build_system_prompt("natural prose", "Hello there.");
+        assert!(s.contains("Hello there."));
+        assert!(s.contains("Prior text"));
+    }
+
+    #[test]
+    fn system_prompt_skips_prior_block_when_empty() {
+        let s = build_system_prompt("natural prose", "");
+        assert!(!s.contains("Prior text"));
+    }
+
+    #[test]
+    fn disabled_polish_returns_raw_and_skips_context() {
+        let cfg = PolishConfig {
+            enabled: false,
+            base_url: "http://invalid.invalid".into(),
+            model: "doesnt-matter".into(),
+            api_key_env: "OPENAI_API_KEY".into(),
+            per_app_tone: true,
+        };
+        let ctx = PolishContext::new();
+        let out = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(polish(&cfg, "raw text here", None, &ctx));
+        assert_eq!(out, "raw text here");
+        assert!(ctx.snapshot().is_empty());
+    }
 }
