@@ -124,8 +124,7 @@ pub async fn run<C: DictationControl>(control: std::sync::Arc<C>) -> Result<()> 
         }
     }
 
-    let listener = UnixListener::bind(&path)
-        .with_context(|| format!("bind {}", path.display()))?;
+    let listener = UnixListener::bind(&path).with_context(|| format!("bind {}", path.display()))?;
     // Owner-only access. The socket lives in $XDG_RUNTIME_DIR which is
     // already 0700, so this is defense-in-depth.
     use std::os::unix::fs::PermissionsExt;
@@ -271,10 +270,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn toggle_flips_state() {
         let ctrl = Arc::new(FakeControl::default());
-        let path = std::env::temp_dir().join(format!(
-            "qol-test-{}.sock",
-            std::process::id()
-        ));
+        let path = std::env::temp_dir().join(format!("qol-test-{}.sock", std::process::id()));
         // Wire up listener manually since spawn() reads env vars.
         let _ = std::fs::remove_file(&path);
         let listener = UnixListener::bind(&path).unwrap();

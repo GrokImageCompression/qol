@@ -35,7 +35,11 @@ impl RmsWindow {
         }
         if self.count >= self.target_samples {
             let rms = (self.sum_sq / self.count as f64).sqrt();
-            tracing::info!(rms = format!("{rms:.4}"), samples = self.count, "audio: 1s RMS");
+            tracing::info!(
+                rms = format!("{rms:.4}"),
+                samples = self.count,
+                "audio: 1s RMS"
+            );
             self.sum_sq = 0.0;
             self.count = 0;
         }

@@ -48,8 +48,7 @@ async fn main() -> ashpd::Result<()> {
     let session = proxy.create_session().await?;
 
     let shortcuts = [
-        NewShortcut::new(SHORTCUT_ID, "Toggle qol dictation")
-            .preferred_trigger("CTRL+ALT+space"),
+        NewShortcut::new(SHORTCUT_ID, "Toggle qol dictation").preferred_trigger("CTRL+ALT+space")
     ];
 
     println!(
@@ -60,7 +59,10 @@ async fn main() -> ashpd::Result<()> {
         .bind_shortcuts(&session, &shortcuts, None)
         .await?
         .response()?;
-    println!("Bind OK. Portal accepted {} shortcut(s):", bind.shortcuts().len());
+    println!(
+        "Bind OK. Portal accepted {} shortcut(s):",
+        bind.shortcuts().len()
+    );
     for s in bind.shortcuts() {
         println!(
             "  - id={:?} description={:?} trigger={:?}",

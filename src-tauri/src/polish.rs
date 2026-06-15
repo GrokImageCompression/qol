@@ -336,9 +336,12 @@ mod tests {
             per_app_tone: true,
         };
         let ctx = PolishContext::new();
-        let out = tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(polish(&cfg, "raw text here", None, &ctx));
+        let out = tokio::runtime::Runtime::new().unwrap().block_on(polish(
+            &cfg,
+            "raw text here",
+            None,
+            &ctx,
+        ));
         assert_eq!(out, "raw text here");
         assert!(ctx.snapshot().is_empty());
     }

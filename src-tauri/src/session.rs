@@ -57,13 +57,9 @@ impl Session {
                 }
                 match parse_command(&raw) {
                     Command::Text(text) => {
-                        let polished = polish(
-                            &polish_cfg,
-                            &text,
-                            app_for_polish.as_deref(),
-                            &polish_ctx,
-                        )
-                        .await;
+                        let polished =
+                            polish(&polish_cfg, &text, app_for_polish.as_deref(), &polish_ctx)
+                                .await;
                         let normalized = polished.trim().to_string();
                         if last_polished.as_deref() == Some(normalized.as_str()) {
                             tracing::debug!(text = %normalized, "skipping duplicate segment");

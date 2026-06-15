@@ -211,9 +211,7 @@ fn run_ydotool(rx: mpsc::Receiver<InjectCmd>, ready_tx: mpsc::Sender<Result<(), 
             InjectCmd::Type { text, .. } => ydotool_type(&text),
             InjectCmd::Backspace(n) => ydotool_key_repeat("14:1 14:0", n),
             InjectCmd::Newline => ydotool_key("28:1 28:0"),
-            InjectCmd::Paragraph => {
-                ydotool_key("28:1 28:0").and_then(|_| ydotool_key("28:1 28:0"))
-            }
+            InjectCmd::Paragraph => ydotool_key("28:1 28:0").and_then(|_| ydotool_key("28:1 28:0")),
             InjectCmd::SelectAll => ydotool_key("29:1 30:1 30:0 29:0"),
         };
         if let Err(e) = result {
