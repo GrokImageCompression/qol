@@ -220,8 +220,23 @@ fn run_ydotool(rx: mpsc::Receiver<InjectCmd>, ready_tx: mpsc::Sender<Result<(), 
     }
 }
 
+/// Build a `ydotool` command pointed at the daemon socket.
+///
+/// The `ydotool` client defaults to `$XDG_RUNTIME_DIR/.ydotool_socket`, but the
+/// Fedora system service runs `ydotoold` as root with the socket at
+/// `/tmp/.ydotool_socket`. Honour an explicit `YDOTOOL_SOCKET` override if the
+/// environment already sets one, otherwise fall back to that system path so the
+/// app works regardless of how the session environment is configured.
+fn ydotool_cmd() -> ProcCommand {
+    let mut cmd = ProcCommand::new("ydotool");
+    if std::env::var_os("YDOTOOL_SOCKET").is_none() {
+        cmd.env("YDOTOOL_SOCKET", "/tmp/.ydotool_socket");
+    }
+    cmd
+}
+
 fn ydotool_type(text: &str) -> Result<()> {
-    let status = ProcCommand::new("ydotool")
+    let status = ydotool_cmd()
         .arg("type")
         .arg("--")
         .arg(text)
@@ -234,7 +249,7 @@ fn ydotool_type(text: &str) -> Result<()> {
 }
 
 fn ydotool_key(combo: &str) -> Result<()> {
-    let status = ProcCommand::new("ydotool")
+    let status = ydotool_cmd()
         .arg("key")
         .args(combo.split_whitespace())
         .status()

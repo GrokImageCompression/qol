@@ -70,35 +70,84 @@ sudo dnf install -y \
 ### Wayland (GNOME, KDE Plasma 6 in Wayland mode)
 
 GNOME Wayland blocks synthetic X11 input, so we automatically detect Wayland
-and route injection through `ydotool`. Setup:
+and route injection through `ydotool`.
 
 ```bash
 sudo dnf install ydotool   # or: apt install ydotool
+```
 
-# uinput needs to be readable by your user — easiest via udev rule:
+How you set this up depends on whether `ydotoold` runs as **root** (a system
+service — Fedora/Debian/Ubuntu) or as **your user** (an Arch user unit).
+
+#### System service running as root (Fedora, Debian/Ubuntu)
+
+This is the common case. `ydotoold` runs as root, so it already has `/dev/uinput`
+access — **you do not need a udev rule or the `input` group.** Those only matter
+when the daemon runs as your user (next section).
+
+The real problem is the **socket**. Run as root, `ydotoold` creates
+`/tmp/.ydotool_socket` owned `root:root 0600`, which (a) your unprivileged
+clients can't open, and (b) isn't where the client looks by default
+(`$XDG_RUNTIME_DIR/.ydotool_socket`, i.e. `/run/user/<uid>/.ydotool_socket`).
+Two mismatches, both silent.
+
+Fix both with a drop-in that pins a known path, hands ownership to your user,
+and makes it group-readable (replace `1000:1000` with your `id -u`:`id -g`):
+
+```bash
+sudo systemctl enable ydotool          # Fedora unit name; Debian: ydotoold
+sudo mkdir -p /etc/systemd/system/ydotool.service.d
+sudo tee /etc/systemd/system/ydotool.service.d/socket.conf >/dev/null <<'EOF'
+[Service]
+ExecStart=
+ExecStart=/usr/bin/ydotoold --socket-path=/tmp/.ydotool_socket --socket-perm=0660 --socket-own=1000:1000
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart ydotool
+```
+
+Then tell clients where the socket is. qol already does this internally
+(`inject.rs` sets `YDOTOOL_SOCKET=/tmp/.ydotool_socket` unless you override it),
+so qol works with no further config. For your own shell, make it permanent:
+
+```bash
+echo 'YDOTOOL_SOCKET=/tmp/.ydotool_socket' | sudo tee -a /etc/environment
+```
+
+Because the socket is owned by your user (not `root:input`), this works
+**without** the `input` group and **without** a logout — group membership added
+by `usermod -aG` doesn't reach an already-running GNOME session anyway, which is
+the usual reason "it worked after I logged out" turns out false.
+
+#### Daemon running as your user (Arch AUR user unit)
+
+Here `ydotoold` runs as you, so it needs `/dev/uinput` access via a udev rule and
+the `input` group, and the socket lands in `$XDG_RUNTIME_DIR` where the client
+already looks — no `YDOTOOL_SOCKET` needed:
+
+```bash
 echo 'KERNEL=="uinput", MODE="0660", GROUP="input"' | \
   sudo tee /etc/udev/rules.d/80-uinput.rules
 sudo udevadm control --reload && sudo udevadm trigger
-sudo usermod -aG input "$USER"   # log out + back in
-
-# Start the daemon. Unit name varies by distro:
-#   Fedora:           ydotool.service  (system)
-#   Debian/Ubuntu:    ydotoold.service (system)
-#   Arch (AUR):       ydotool.service  (user) — use --user
-sudo systemctl enable --now ydotool     # Fedora
-# sudo systemctl enable --now ydotoold  # Debian/Ubuntu
-# systemctl --user enable --now ydotool # Arch user unit
+sudo usermod -aG input "$USER"          # then fully log out + back in (or reboot)
+systemctl --user enable --now ydotool
 ```
 
-Verify the daemon is running and your user can talk to it:
+#### Verify
 
 ```bash
-systemctl status ydotool --no-pager    # active (running)
-ydotool type "hello"                   # should type into focused window
+systemctl status ydotool --no-pager                  # active (running)
+ls -l "${YDOTOOL_SOCKET:-/tmp/.ydotool_socket}"      # socket exists, owned by you
+YDOTOOL_SOCKET=/tmp/.ydotool_socket ydotool type "hello"   # types into focused window
 ```
 
-If `ydotool type` errors with `failed to open uinput device`, the `input`
-group hasn't taken effect — log out + back in, or check the udev rule.
+- `failed to connect socket … No such file or directory` → daemon isn't running,
+  or the client is looking at the wrong path (set `YDOTOOL_SOCKET`).
+- `failed to connect socket … Permission denied` → the socket is owned
+  `root:input` and your session isn't in `input`; use the `--socket-own` drop-in
+  above instead of relying on the group.
+- `failed to open uinput device` → only with a user-run daemon: the udev rule or
+  `input` group hasn't taken effect (reboot to be sure).
 
 qol picks the backend automatically at startup. Look for
 `selected injection backend = Ydotool` in the logs to confirm.
