@@ -12,6 +12,7 @@
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::config::PolishConfig;
@@ -49,9 +50,18 @@ struct RespMsg {
 }
 
 /// Sliding window of previously-polished output for one dictation session.
+///
+/// Also carries a per-session "disabled" flag: if a polish call fails
+/// (401 from the API, network error, malformed response, anything), we
+/// flip the flag, log the failure once, and skip polish for the rest of
+/// the session — the raw transcript still gets injected, but we stop
+/// spamming the LLM endpoint with every segment. Fresh sessions start
+/// re-enabled, so the user gets exactly one warning per session if their
+/// config is broken.
 #[derive(Clone, Default)]
 pub struct PolishContext {
     inner: Arc<Mutex<String>>,
+    disabled: Arc<AtomicBool>,
 }
 
 impl PolishContext {
@@ -61,6 +71,17 @@ impl PolishContext {
 
     pub fn snapshot(&self) -> String {
         self.inner.lock().clone()
+    }
+
+    pub fn is_disabled(&self) -> bool {
+        self.disabled.load(Ordering::Relaxed)
+    }
+
+    /// Mark this context as broken so subsequent polish() calls skip the
+    /// network round-trip. Returns true if this was the first time we
+    /// disabled it (caller uses that to log exactly once).
+    pub fn disable(&self) -> bool {
+        !self.disabled.swap(true, Ordering::Relaxed)
     }
 
     pub fn append(&self, polished: &str) {
@@ -86,7 +107,7 @@ pub async fn polish(
     app: Option<&str>,
     ctx: &PolishContext,
 ) -> String {
-    if !cfg.enabled || raw.trim().is_empty() {
+    if !cfg.enabled || raw.trim().is_empty() || ctx.is_disabled() {
         return raw.to_string();
     }
     match polish_inner(cfg, raw, app, ctx).await {
@@ -95,7 +116,16 @@ pub async fn polish(
             out
         }
         Err(e) => {
-            tracing::warn!(error = ?e, "polish failed, falling back to raw");
+            // First failure flips the per-session disable flag. Subsequent
+            // segments skip the network round-trip entirely — no spam.
+            if ctx.disable() {
+                tracing::warn!(
+                    error = ?e,
+                    "polish failed; disabling for the rest of this session. \
+                     Check your base_url / api_key_env / model. \
+                     Raw transcripts will keep flowing through."
+                );
+            }
             raw.to_string()
         }
     }
@@ -265,6 +295,35 @@ mod tests {
     fn system_prompt_skips_prior_block_when_empty() {
         let s = build_system_prompt("natural prose", "");
         assert!(!s.contains("Prior text"));
+    }
+
+    #[test]
+    fn disable_returns_true_only_once() {
+        let ctx = PolishContext::new();
+        assert!(!ctx.is_disabled());
+        assert!(ctx.disable(), "first call should be the transition");
+        assert!(ctx.is_disabled());
+        assert!(!ctx.disable(), "second call must NOT log again");
+        assert!(!ctx.disable(), "still no");
+    }
+
+    #[test]
+    fn disabled_ctx_short_circuits_polish() {
+        let cfg = PolishConfig {
+            enabled: true, // enabled in config — but ctx flag should win
+            base_url: "http://example.invalid".into(),
+            model: "ignored".into(),
+            api_key_env: "OPENAI_API_KEY".into(),
+            per_app_tone: true,
+        };
+        let ctx = PolishContext::new();
+        ctx.disable();
+        let out = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(polish(&cfg, "raw text", None, &ctx));
+        // No HTTP call attempted; raw passes through, context stays empty.
+        assert_eq!(out, "raw text");
+        assert!(ctx.snapshot().is_empty());
     }
 
     #[test]

@@ -11,9 +11,11 @@ mod polish;
 mod session;
 mod shortcut;
 mod transport;
+mod trigger;
 
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, RunEvent};
@@ -23,12 +25,60 @@ use crate::config::Config;
 use crate::inject::InjectorHandle;
 use crate::session::Session;
 use crate::shortcut::parse_shortcut;
+use crate::trigger::DictationControl;
 
 pub struct AppState {
     pub cfg: Mutex<Config>,
     pub injector: InjectorHandle,
     pub session: Mutex<Option<Session>>,
     pub paused: AtomicBool,
+}
+
+impl AppState {
+    fn start_locked(&self) -> bool {
+        let mut slot = self.session.lock();
+        if slot.is_some() {
+            return false;
+        }
+        let cfg = self.cfg.lock().clone();
+        match Session::start(cfg, self.injector.clone()) {
+            Ok(sess) => {
+                tracing::info!("session started");
+                *slot = Some(sess);
+                true
+            }
+            Err(e) => {
+                tracing::error!(error = ?e, "session start failed");
+                false
+            }
+        }
+    }
+
+    fn stop_locked(&self) -> bool {
+        let Some(sess) = self.session.lock().take() else {
+            return false;
+        };
+        tauri::async_runtime::spawn(async move {
+            sess.stop().await;
+            tracing::info!("session stopped");
+        });
+        true
+    }
+}
+
+impl DictationControl for AppState {
+    fn start(&self) -> bool {
+        if self.paused.load(Ordering::Relaxed) {
+            return false;
+        }
+        self.start_locked()
+    }
+    fn stop(&self) -> bool {
+        self.stop_locked()
+    }
+    fn is_recording(&self) -> bool {
+        self.session.lock().is_some()
+    }
 }
 
 const TRAY_OPEN: &str = "qol_open";
@@ -46,12 +96,24 @@ fn main() {
     let cfg = Config::load().expect("load config");
     let injector = InjectorHandle::spawn().expect("init keystroke injector");
 
-    let state = AppState {
+    let state = Arc::new(AppState {
         cfg: Mutex::new(cfg.clone()),
         injector,
         session: Mutex::new(None),
         paused: AtomicBool::new(false),
-    };
+    });
+
+    // Start the Unix-socket trigger listener (used by `qol-trigger` as the
+    // Wayland-on-GNOME workaround for global hotkeys). Runs on every
+    // platform — cheap, and useful even on X11 for scripting.
+    {
+        let control = state.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = trigger::run(control).await {
+                tracing::error!(error = ?e, "trigger listener exited");
+            }
+        });
+    }
 
     let shortcut = parse_shortcut(&cfg.hotkey)
         .unwrap_or_else(|| Shortcut::new(Some(Modifiers::SUPER), Code::Space));
@@ -76,13 +138,17 @@ fn main() {
                     if sc != &shortcut {
                         return;
                     }
-                    let state = app.state::<AppState>();
+                    let state = app.state::<Arc<AppState>>();
                     if state.paused.load(Ordering::Relaxed) {
                         return;
                     }
                     match event.state() {
-                        ShortcutState::Pressed => start_session(&state),
-                        ShortcutState::Released => stop_session(&state),
+                        ShortcutState::Pressed => {
+                            state.start_locked();
+                        }
+                        ShortcutState::Released => {
+                            state.stop_locked();
+                        }
                     }
                 })
                 .build(),
@@ -113,12 +179,12 @@ fn main() {
                         }
                     }
                     TRAY_PAUSE => {
-                        let state = app.state::<AppState>();
+                        let state = app.state::<Arc<AppState>>();
                         let was = state.paused.fetch_xor(true, Ordering::Relaxed);
                         let now_paused = !was;
                         tracing::info!(paused = now_paused, "toggle pause");
                         if now_paused {
-                            stop_session(&state);
+                            state.stop_locked();
                         }
                     }
                     TRAY_QUIT => {
@@ -149,38 +215,13 @@ fn main() {
         });
 }
 
-fn start_session(state: &tauri::State<AppState>) {
-    let mut slot = state.session.lock();
-    if slot.is_some() {
-        return;
-    }
-    let cfg = state.cfg.lock().clone();
-    match Session::start(cfg, state.injector.clone()) {
-        Ok(sess) => {
-            tracing::info!("session started");
-            *slot = Some(sess);
-        }
-        Err(e) => tracing::error!(error = ?e, "session start failed"),
-    }
-}
-
-fn stop_session(state: &tauri::State<AppState>) {
-    let Some(sess) = state.session.lock().take() else {
-        return;
-    };
-    tauri::async_runtime::spawn(async move {
-        sess.stop().await;
-        tracing::info!("session stopped");
-    });
-}
-
 #[tauri::command]
-fn get_config(state: tauri::State<AppState>) -> Config {
+fn get_config(state: tauri::State<Arc<AppState>>) -> Config {
     state.cfg.lock().clone()
 }
 
 #[tauri::command]
-fn save_config(new_cfg: Config, state: tauri::State<AppState>) -> Result<(), String> {
+fn save_config(new_cfg: Config, state: tauri::State<Arc<AppState>>) -> Result<(), String> {
     new_cfg.save().map_err(|e| e.to_string())?;
     *state.cfg.lock() = new_cfg;
     Ok(())

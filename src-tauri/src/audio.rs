@@ -10,6 +10,38 @@ use tokio::sync::mpsc;
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
 const RESAMPLER_CHUNK: usize = 1024;
 
+/// Accumulates audio samples for ~1 second and logs the RMS so we can tell
+/// whether the cpal callback is actually receiving non-silent audio. RMS
+/// is reported on a 0–1 scale (1 = full scale). Anything under ~0.01 is
+/// effectively silent; speech typically sits at 0.05–0.3.
+struct RmsWindow {
+    target_samples: usize,
+    sum_sq: f64,
+    count: usize,
+}
+
+impl RmsWindow {
+    fn new(rate_per_second: usize) -> Self {
+        Self {
+            target_samples: rate_per_second.max(1),
+            sum_sq: 0.0,
+            count: 0,
+        }
+    }
+    fn add(&mut self, mono: &[f32]) {
+        for s in mono {
+            self.sum_sq += (*s as f64) * (*s as f64);
+            self.count += 1;
+        }
+        if self.count >= self.target_samples {
+            let rms = (self.sum_sq / self.count as f64).sqrt();
+            tracing::info!(rms = format!("{rms:.4}"), samples = self.count, "audio: 1s RMS");
+            self.sum_sq = 0.0;
+            self.count = 0;
+        }
+    }
+}
+
 /// Send handle to a dedicated thread that owns the !Send `cpal::Stream`.
 /// Drop the handle to stop capture.
 pub struct CaptureHandle {
@@ -108,22 +140,35 @@ impl ResampleStage {
 
 fn build_stream(samples_tx: mpsc::UnboundedSender<Vec<f32>>) -> Result<cpal::Stream> {
     let host = cpal::default_host();
+    tracing::info!(host = ?host.id(), "audio: cpal host");
     let device = host
         .default_input_device()
         .ok_or_else(|| anyhow!("no default input device"))?;
+    let device_name = device.name().unwrap_or_else(|_| "<unknown>".into());
     let supported = device
         .default_input_config()
         .context("query default input config")?;
     let src_rate = supported.sample_rate().0;
     let channels = supported.channels() as usize;
     let format = supported.sample_format();
+    tracing::info!(
+        device = %device_name,
+        rate = src_rate,
+        channels,
+        format = ?format,
+        "audio: using input device",
+    );
     let cfg: StreamConfig = supported.into();
     let err_fn = |e| tracing::error!(error = ?e, "audio input stream error");
 
     let stage = Arc::new(StdMutex::new(ResampleStage::new(src_rate, samples_tx)?));
 
+    // Periodic-RMS counter for debugging "is the mic actually capturing?".
+    // Logs roughly once per second of audio.
+    let rms_window = Arc::new(StdMutex::new(RmsWindow::new(src_rate as usize)));
     let process = {
         let stage = stage.clone();
+        let rms_window = rms_window.clone();
         move |samples: Vec<f32>| {
             let mono: Vec<f32> = if channels > 1 {
                 samples
@@ -133,6 +178,9 @@ fn build_stream(samples_tx: mpsc::UnboundedSender<Vec<f32>>) -> Result<cpal::Str
             } else {
                 samples
             };
+            if let Ok(mut w) = rms_window.lock() {
+                w.add(&mono);
+            }
             if let Ok(mut g) = stage.lock() {
                 g.push(&mono);
             }

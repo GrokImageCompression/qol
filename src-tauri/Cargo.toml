@@ -32,6 +32,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 enigo = "0.2"
 active-win-pos-rs = "0.9"
 
+# Wayland global-shortcut path: xdg-desktop-portal GlobalShortcuts interface.
+# Linux-only — every other platform stays on tauri-plugin-global-shortcut.
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.10", default-features = false, features = ["tokio"] }
+
 # Serialization & utility
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -42,6 +47,24 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 directories = "5"
 once_cell = "1"
 parking_lot = "0.12"
+libc = "0.2"
+
+# Standalone test binary for the Wayland GlobalShortcuts portal path.
+# Lets us validate the portal end-to-end with zero qol dependencies
+# (no mic, no Aavaaz, no injection).
+[[bin]]
+name = "qol"
+path = "src/main.rs"
+
+[[bin]]
+name = "portal_test"
+path = "src/bin/portal_test.rs"
+
+# Tiny CLI for the Wayland workaround — bind a GNOME / KDE custom
+# keybinding to `qol-trigger toggle` to start/stop dictation.
+[[bin]]
+name = "qol-trigger"
+path = "src/bin/qol_trigger.rs"
 
 [features]
 default = ["custom-protocol"]

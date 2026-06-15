@@ -81,12 +81,74 @@ echo 'KERNEL=="uinput", MODE="0660", GROUP="input"' | \
 sudo udevadm control --reload && sudo udevadm trigger
 sudo usermod -aG input "$USER"   # log out + back in
 
-# Start the daemon (usually as a systemd user unit):
-systemctl --user enable --now ydotoold
+# Start the daemon. Unit name varies by distro:
+#   Fedora:           ydotool.service  (system)
+#   Debian/Ubuntu:    ydotoold.service (system)
+#   Arch (AUR):       ydotool.service  (user) — use --user
+sudo systemctl enable --now ydotool     # Fedora
+# sudo systemctl enable --now ydotoold  # Debian/Ubuntu
+# systemctl --user enable --now ydotool # Arch user unit
 ```
+
+Verify the daemon is running and your user can talk to it:
+
+```bash
+systemctl status ydotool --no-pager    # active (running)
+ydotool type "hello"                   # should type into focused window
+```
+
+If `ydotool type` errors with `failed to open uinput device`, the `input`
+group hasn't taken effect — log out + back in, or check the udev rule.
 
 qol picks the backend automatically at startup. Look for
 `selected injection backend = Ydotool` in the logs to confirm.
+
+### Wayland hotkey — use `qol-trigger` + GNOME Custom Shortcut
+
+`tauri-plugin-global-shortcut` can't grab keys under GNOME Wayland (Mutter
+refuses the X11-style key grab), and the modern `xdg-desktop-portal`
+GlobalShortcuts interface rejects non-sandboxed apps because the portal
+sends an empty `app_id` and `gnome-control-center` discards the request:
+
+```
+gnome-control-center-global-shortcuts-provider:
+  Discarded shortcut bind request from application with an invalid app_id ><.
+```
+
+Workaround: qol always opens a Unix socket at `$XDG_RUNTIME_DIR/qol.sock`,
+and ships a tiny `qol-trigger` CLI that pokes it. Bind a GNOME Custom
+Shortcut to `qol-trigger toggle` and you get a working hotkey on Wayland:
+
+1. Install the CLI on your PATH:
+   ```bash
+   sudo install -m 755 src-tauri/target/debug/qol-trigger /usr/local/bin/qol-trigger
+   ```
+2. **Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts → +**
+   - **Name**: `qol toggle dictation`
+   - **Command**: `/usr/local/bin/qol-trigger toggle`
+   - **Shortcut**: pick your combo (e.g. `Ctrl+Alt+Space` — make sure
+     nothing else has it; `Super+Space` is grabbed by GNOME's input-source
+     switcher and won't reach the command)
+3. Start `qol` once so the socket exists, then press your combo. First
+   press starts dictation, second press stops it.
+
+Since GNOME custom keybindings only fire on press (no release event), the
+hotkey is **toggle**, not push-to-talk. Aavaaz's VAD finalizes segments
+naturally during dictation; toggling again ends the session.
+
+Other commands the CLI supports:
+
+```bash
+qol-trigger status     # prints "idle" or "recording"
+qol-trigger start      # idempotent
+qol-trigger stop       # idempotent
+qol-trigger toggle     # default
+```
+
+The trigger socket is enabled on every OS, not just Linux, so the same
+CLI works from scripts on macOS and X11 too. On X11/macOS/Windows you
+also still have real push-to-talk through the in-process global-shortcut
+plugin — pick whichever feels better.
 
 ## Run
 
@@ -103,6 +165,139 @@ npm run tauri dev
 ```
 
 Then press your hotkey (default `Super+Space`), speak, and release.
+
+## First run — testing against a local Aavaaz
+
+This walks through the end-to-end smoke test from a cold start. Aimed at a
+single workstation: Aavaaz running on `localhost`, qol injecting into the
+focused text field.
+
+### 1. Build qol once
+
+```bash
+cd ~/src/qol
+npm install
+( cd src-tauri && cargo build )
+```
+
+The first build pulls a lot of dependencies (~5 min). Subsequent builds are
+seconds.
+
+### 2. Start Aavaaz
+
+Pick a model that fits your GPU's VRAM. For a 6 GB card (e.g. RTX 3060):
+
+```bash
+cd ~/src/Aavaaz/aavaaz
+source .venv/bin/activate
+aavaaz serve --model distil-large-v3
+```
+
+You should see something like:
+
+```
+INFO  whisper_live - WebSocket server listening on 0.0.0.0:9090
+INFO  whisper_live - Loaded distil-large-v3 on cuda:0
+```
+
+Sanity-check from another terminal:
+
+```bash
+ss -tln | grep 9090            # port is listening
+```
+
+### 3. Disable polish for the first test
+
+We want to isolate STT before mixing in an LLM. Either toggle it off in the
+settings window after first launch, or pre-seed the config:
+
+```bash
+mkdir -p ~/.config/qol
+cat > ~/.config/qol/config.json <<'EOF'
+{
+  "aavaaz_url": "ws://localhost:9090",
+  "model": "distil-large-v3",
+  "language": "en",
+  "hotkey": "Super+Space",
+  "polish": {
+    "enabled": false,
+    "base_url": "https://api.openai.com/v1",
+    "model": "gpt-4o-mini",
+    "api_key_env": "OPENAI_API_KEY",
+    "per_app_tone": true
+  },
+  "hotwords": [],
+  "inject_method": "type"
+}
+EOF
+```
+
+### 4. Run qol with logs visible
+
+```bash
+RUST_LOG=qol=debug,warn ~/src/qol/src-tauri/target/debug/qol
+```
+
+You should see roughly:
+
+```
+INFO qol::inject: selected injection backend backend=Enigo
+```
+
+(`backend=Ydotool` if you're on Wayland with `ydotool` installed.)
+
+The window stays hidden. Look for the tray icon — see
+[Troubleshooting](#troubleshooting) if it's missing on GNOME.
+
+### 5. Dictate
+
+1. Focus any text field (a terminal, gedit, your browser address bar).
+2. Hold `Super+Space`, say a sentence, release.
+3. Watch the qol logs — you should see:
+   ```
+   INFO qol: session started
+   DEBUG qol::session: session started app=Some("...")
+   INFO qol: session stopped
+   ```
+4. The transcript should land in the focused field within ~1 second of
+   release.
+
+### 6. Enable polish (optional)
+
+Open the settings window from the tray, check **Clean up transcripts**, and
+configure:
+
+- **OpenAI**: `https://api.openai.com/v1`, model `gpt-4o-mini`, env var `OPENAI_API_KEY`
+- **Groq** (very fast): `https://api.groq.com/openai/v1`, model `llama-3.1-8b-instant`, env var `GROQ_API_KEY`
+- **Local Ollama**: `http://localhost:11434/v1`, model `qwen2.5:7b-instruct`, env var blank
+
+`export` the key in the same shell you launch qol from, then restart qol.
+
+### Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Aavaaz errors `libcudnn_ops_infer.so: cannot open` | cuDNN not on path | `pip install nvidia-cudnn-cu12` inside the Aavaaz venv |
+| Aavaaz `CUDA out of memory` | Model too big for your VRAM | Use `distil-large-v3` or `medium` instead of `large-v3` |
+| qol logs "no default input device" | Mic not picked by PulseAudio/Pipewire | `pactl list sources short`; set a default with `pactl set-default-source <name>` |
+| No tray icon on GNOME | GNOME hides AppIndicators by default | `sudo dnf install gnome-shell-extension-appindicator`, then enable "AppIndicator and KStatusNotifierItem Support" |
+| Hotkey does nothing | Already grabbed by another app | Pick a different combo in settings (e.g. `Ctrl+Alt+Space`) |
+| Text doesn't appear in focused app (GNOME Wayland) | Wayland blocks synthetic input | Install `ydotool` + `ydotoold` (see Wayland section above); restart qol; verify `backend=Ydotool` in logs |
+| Polish silently produces no text | API key env var unset or wrong name | `echo $OPENAI_API_KEY`; restart qol after `export`-ing |
+| `connect failed: ConnectionRefused` | Aavaaz not running | Start it on `:9090` first |
+
+### What "good" looks like
+
+End-to-end, on a 6 GB GPU with polish disabled, expect roughly:
+
+- Hotkey press → first PCM frame to Aavaaz: <50 ms
+- End of speech → first completed segment from Aavaaz: 300–800 ms (depends on VAD pause threshold)
+- First completed segment → text in focused app: <50 ms
+- With polish enabled (OpenAI `gpt-4o-mini`): add ~300–600 ms per segment
+
+If you're seeing multi-second lag, that's almost always Aavaaz model load
+or CPU fallback (check `nvidia-smi` while dictating — qol should drive the
+GPU to ~30% utilization momentarily).
 
 ## Settings
 
