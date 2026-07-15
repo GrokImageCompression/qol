@@ -17,12 +17,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Linux-only for now. Windows (Unix-only trigger.rs) and macOS (deps
-        # build but the qol crate links none of them; needs `cargo clippy -v`
-        # on a real Mac to inspect the rustc --extern flags) are unverified.
-        # Tracked as Phase 5 work.
+        # Windows omitted (Unix-only trigger.rs). macOS temporarily re-added to
+        # diagnose the deps-not-linked build failure.
         platform:
           - { os: ubuntu-latest, label: ubuntu }
+          - { os: macos-latest,  label: macos }
 
     steps:
       - uses: actions/checkout@v4
@@ -69,6 +68,17 @@ jobs:
 
       - name: Build frontend
         run: pnpm run build
+
+      # TEMP diagnostic: capture the exact rustc invocation for the qol bin on
+      # macOS to see whether cargo omits the --extern flags for its deps.
+      - name: macos verbose diagnostic
+        if: matrix.platform.label == 'macos'
+        working-directory: src-tauri
+        run: |
+          cargo clean
+          cargo build -v 2>&1 | grep -E "Running .*--crate-name qol " | tr ' ' '\n' | grep -E "crate-name|--edition|--extern|-L " | head -80 || true
+          echo "=== exit build ==="
+          cargo build 2>&1 | tail -30 || true
 
       # ──────────────── checks ────────────────
       - name: Rustfmt
