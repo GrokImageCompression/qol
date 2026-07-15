@@ -212,7 +212,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_config,
             save_config,
-            test_aavaaz
+            test_aavaaz,
+            set_polish_api_key,
+            has_polish_api_key
         ])
         .setup(|app| {
             {
@@ -294,6 +296,33 @@ async fn test_aavaaz(url: String) -> Result<String, String> {
         .await
         .map(|_| format!("connected to {url}"))
         .map_err(|e| format!("connect failed: {e}"))
+}
+
+// Sync commands run on a Tauri worker thread, off the tokio reactor, so the
+// blocking keyring I/O below can't wedge the async runtime. keyring::Error's
+// Display never contains the secret, so mapping it to a string is safe.
+
+/// Store the polish key in the OS keyring under this base_url, or delete the
+/// entry when `key` is empty. Never logs the key.
+#[tauri::command]
+fn set_polish_api_key(base_url: String, key: String) -> Result<(), String> {
+    let entry =
+        keyring::Entry::new(polish::KEYRING_SERVICE, &base_url).map_err(|e| e.to_string())?;
+    if key.is_empty() {
+        // empty means "clear it"; a missing entry is already that state.
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
+    } else {
+        entry.set_password(&key).map_err(|e| e.to_string())
+    }
+}
+
+/// Whether a polish key is stored for this base_url. Never returns the value.
+#[tauri::command]
+fn has_polish_api_key(base_url: String) -> bool {
+    polish::keyring_get(&base_url).is_some()
 }
 
 #[cfg(test)]

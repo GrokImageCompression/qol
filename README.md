@@ -44,7 +44,9 @@ for filler removal, punctuation, and per-app tone.
 - Node 20+ (`pnpm` or `npm`)
 - A running Aavaaz instance at `ws://localhost:9090`
 - Optional LLM polish: any **OpenAI-compatible** endpoint —
-  - `OPENAI_API_KEY` env var for OpenAI (default)
+  - Store the key in the OS keyring via the settings window (checked first,
+    keyed by `base_url`), or set an env var as fallback — see [Settings](#settings)
+  - `OPENAI_API_KEY` env var for OpenAI (default fallback name)
   - Or point `base_url` at Groq, OpenRouter, Together, Cerebras, Mistral, ...
   - Or **fully local**: Ollama (`http://localhost:11434/v1`, model `qwen2.5:7b-instruct`)
     or llama.cpp's `--server` (`http://localhost:8080/v1`) — leave the API key
@@ -316,11 +318,16 @@ The window stays hidden. Look for the tray icon — see
 Open the settings window from the tray, check **Clean up transcripts**, and
 configure:
 
-- **OpenAI**: `https://api.openai.com/v1`, model `gpt-4o-mini`, env var `OPENAI_API_KEY`
-- **Groq** (very fast): `https://api.groq.com/openai/v1`, model `llama-3.1-8b-instant`, env var `GROQ_API_KEY`
-- **Local Ollama**: `http://localhost:11434/v1`, model `qwen2.5:7b-instruct`, env var blank
+- **OpenAI**: `https://api.openai.com/v1`, model `gpt-4o-mini`
+- **Groq** (very fast): `https://api.groq.com/openai/v1`, model `llama-3.1-8b-instant`
+- **Local Ollama**: `http://localhost:11434/v1`, model `qwen2.5:7b-instruct`, no key
 
-`export` the key in the same shell you launch qol from, then restart qol.
+Paste the key into **API key** and hit **Save key to keyring** — it's stored in
+the OS keyring (GNOME Keyring/KWallet, macOS Keychain, Windows Credential
+Manager), keyed by `base_url`, and never written to `config.json` or shown back.
+Blank the field and save to clear it. If no key is stored, qol falls back to the
+env var named in **API key env var** (`export` it in the shell you launch qol
+from, then restart). Local servers need no key at all.
 
 ### Troubleshooting
 
@@ -332,7 +339,7 @@ configure:
 | No tray icon on GNOME | GNOME hides AppIndicators by default | `sudo dnf install gnome-shell-extension-appindicator`, then enable "AppIndicator and KStatusNotifierItem Support" |
 | Hotkey does nothing | Already grabbed by another app | Pick a different combo in settings (e.g. `Ctrl+Alt+Space`) |
 | Text doesn't appear in focused app (GNOME Wayland) | Wayland blocks synthetic input | Install `ydotool` + `ydotoold` (see Wayland section above); restart qol; verify `backend=Ydotool` in logs |
-| Polish silently produces no text | API key env var unset or wrong name | `echo $OPENAI_API_KEY`; restart qol after `export`-ing |
+| Polish silently produces no text | No key in keyring and env var unset/wrong | Save the key in settings, or `echo $OPENAI_API_KEY` and restart qol after `export`-ing |
 | `connect failed: ConnectionRefused` | Aavaaz not running | Start it on `:9090` first |
 
 ### What "good" looks like
@@ -382,6 +389,12 @@ case-insensitive substring of the focused app name; the first matching rule
 wins, else `default_tone` applies. With `per_app_tone` off, `default_tone` is
 always used. Edit rules in the settings window or here directly.
 
+The polish API key is never stored in `config.json`. At request time qol reads
+the OS keyring first (service `qol`, account = `base_url`), then falls back to
+the env var named by `api_key_env`. Manage the stored key from the settings
+window (**Save key to keyring** / blank + save to clear); the UI only shows
+whether a key exists, never its value.
+
 ## Tests & CI
 
 ```bash
@@ -419,7 +432,7 @@ This is a scaffold. Working / stubbed:
 - [x] Local-only polish via llama.cpp / Ollama (OpenAI-compatible `base_url`)
 - [x] Integration tests with a fake Aavaaz WS server + stub polish endpoint
 - [x] Per-app tone profiles configurable in UI
-- [ ] API key stored in OS keyring instead of an env var
+- [x] API key stored in OS keyring (keyring-first, env var fallback)
 
 ## License
 

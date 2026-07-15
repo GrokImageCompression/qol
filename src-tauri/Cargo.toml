@@ -32,6 +32,17 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 enigo = "0.2"
 active-win-pos-rs = "0.9"
 
+# OS keyring for the polish API key. async-secret-service = pure-Rust zbus
+# backend (no libdbus C lib), async-io keeps its internal block_on off tokio's
+# runtime so blocking keyring calls can't deadlock the app's tokio reactor.
+keyring = { version = "3", default-features = false, features = [
+    "async-secret-service",
+    "async-io",
+    "crypto-rust",
+    "apple-native",
+    "windows-native",
+] }
+
 # Wayland global-shortcut path: xdg-desktop-portal GlobalShortcuts interface.
 # Linux-only — every other platform stays on tauri-plugin-global-shortcut.
 [target.'cfg(target_os = "linux")'.dependencies]

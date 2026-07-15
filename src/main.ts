@@ -30,6 +30,10 @@ const status = document.getElementById("status") as HTMLParagraphElement;
 const testBtn = document.getElementById("test") as HTMLButtonElement;
 const toneRows = document.getElementById("tone_rows") as HTMLDivElement;
 const addToneBtn = document.getElementById("add_tone") as HTMLButtonElement;
+const saveKeyBtn = document.getElementById("save_key") as HTMLButtonElement;
+const keyStatus = document.getElementById("key_status") as HTMLSpanElement;
+const apiKeyInput = () => form.elements.namedItem("polish_api_key") as HTMLInputElement;
+const baseUrlInput = () => form.elements.namedItem("polish_base_url") as HTMLInputElement;
 
 function setStatus(msg: string, ok = true) {
   status.textContent = msg;
@@ -82,6 +86,46 @@ function collectToneProfiles(): ToneProfile[] {
 
 addToneBtn.addEventListener("click", () => addToneRow());
 
+// Show only whether a key is stored for the current endpoint, never its value.
+async function refreshKeyStatus() {
+  const baseUrl = baseUrlInput().value.trim();
+  if (!baseUrl) {
+    keyStatus.textContent = "";
+    return;
+  }
+  try {
+    const stored = await invoke<boolean>("has_polish_api_key", { baseUrl });
+    keyStatus.textContent = stored ? "key stored" : "no key stored";
+    keyStatus.style.color = stored ? "" : "#888";
+  } catch {
+    keyStatus.textContent = "";
+  }
+}
+
+saveKeyBtn.addEventListener("click", async () => {
+  const baseUrl = baseUrlInput().value.trim();
+  if (!baseUrl) {
+    setStatus("Set a base URL before saving a key.", false);
+    return;
+  }
+  const key = apiKeyInput().value;
+  try {
+    await invoke("set_polish_api_key", { baseUrl, key });
+    apiKeyInput().value = "";
+    setStatus(key ? "Key saved to keyring." : "Key cleared from keyring.");
+    await refreshKeyStatus();
+  } catch (err) {
+    setStatus(`Key save failed: ${err}`, false);
+  }
+});
+
+// A key is scoped to its base_url, so re-check when the endpoint changes.
+form.addEventListener("input", (e) => {
+  if ((e.target as HTMLElement)?.getAttribute("name") === "polish_base_url") {
+    refreshKeyStatus();
+  }
+});
+
 function fill(cfg: Config) {
   (form.elements.namedItem("aavaaz_url") as HTMLInputElement).value = cfg.aavaaz_url;
   (form.elements.namedItem("model") as HTMLSelectElement).value = cfg.model;
@@ -129,6 +173,7 @@ let current: Config;
 (async () => {
   current = await invoke<Config>("get_config");
   fill(current);
+  await refreshKeyStatus();
 })();
 
 form.addEventListener("submit", async (e) => {

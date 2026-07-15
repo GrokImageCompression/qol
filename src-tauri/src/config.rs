@@ -26,8 +26,10 @@ pub struct PolishConfig {
     ///   - `http://localhost:8080/v1`  (llama.cpp server, vLLM)
     pub base_url: String,
     pub model: String,
-    /// Name of the env var holding the API key. Leave the env var unset for
-    /// local servers (Ollama, llama.cpp) that don't require auth.
+    /// Name of the env var holding the API key. Used only as a fallback: a key
+    /// stored in the OS keyring (via the settings window, keyed by base_url)
+    /// takes precedence. Leave both unset for local servers (Ollama,
+    /// llama.cpp) that don't require auth.
     pub api_key_env: String,
     pub per_app_tone: bool,
     /// Ordered app→tone rules; first rule whose app token is a

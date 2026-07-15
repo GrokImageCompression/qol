@@ -19,6 +19,43 @@ use crate::config::PolishConfig;
 
 const CONTEXT_CHAR_CAP: usize = 2000;
 
+/// Keyring service name; the account is the polish `base_url` so different
+/// providers can each hold their own key.
+pub const KEYRING_SERVICE: &str = "qol";
+
+/// Read the stored polish key for `base_url` from the OS keyring. A missing
+/// entry is expected (returns None); only a real backend failure is logged,
+/// and the key value is never included in a log line.
+///
+/// Blocking call: run it off the async reactor (spawn_blocking / a sync
+/// command), never directly inside a tokio task.
+pub fn keyring_get(base_url: &str) -> Option<String> {
+    let entry = match keyring::Entry::new(KEYRING_SERVICE, base_url) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::warn!(error = ?e, "keyring init failed; falling back to env var");
+            return None;
+        }
+    };
+    match entry.get_password() {
+        Ok(key) => Some(key),
+        Err(keyring::Error::NoEntry) => None,
+        Err(e) => {
+            tracing::warn!(error = ?e, "keyring lookup failed; falling back to env var");
+            None
+        }
+    }
+}
+
+/// Bearer key precedence: a non-empty keyring value wins, else a non-empty env
+/// value, else none. Empty strings count as absent so a keyless local server
+/// (Ollama, llama.cpp) gets no auth header.
+fn resolve_api_key(keyring_key: Option<String>, env_key: Option<String>) -> Option<String> {
+    keyring_key
+        .filter(|k| !k.is_empty())
+        .or_else(|| env_key.filter(|k| !k.is_empty()))
+}
+
 #[derive(Serialize)]
 struct ChatReq<'a> {
     model: &'a str,
@@ -210,14 +247,23 @@ async fn polish_inner(
         .context("build polish http client")?;
     let mut req = client.post(&url).json(&body);
 
-    // Bearer auth only if the configured env var is set. Lets local servers
-    // (Ollama, llama.cpp) work with no key configured.
-    if !cfg.api_key_env.is_empty() {
-        if let Ok(key) = std::env::var(&cfg.api_key_env) {
-            if !key.is_empty() {
-                req = req.bearer_auth(key);
-            }
-        }
+    // Bearer auth from the OS keyring first (keyed by base_url), else the
+    // configured env var. No key anywhere => no auth header, so local servers
+    // (Ollama, llama.cpp) still work. The keyring read is blocking, so push it
+    // onto a worker thread rather than blocking this tokio task.
+    let keyring_key = {
+        let base = cfg.base_url.clone();
+        tokio::task::spawn_blocking(move || keyring_get(&base))
+            .await
+            .unwrap_or(None)
+    };
+    let env_key = if cfg.api_key_env.is_empty() {
+        None
+    } else {
+        std::env::var(&cfg.api_key_env).ok()
+    };
+    if let Some(key) = resolve_api_key(keyring_key, env_key) {
+        req = req.bearer_auth(key);
     }
 
     let resp: ChatResp = req
@@ -355,6 +401,35 @@ mod tests {
         let out = polish(&cfg, "keep me", None, &ctx).await;
         assert_eq!(out, "keep me");
         assert!(ctx.is_disabled());
+    }
+
+    #[test]
+    fn keyring_value_wins_over_env() {
+        let got = resolve_api_key(Some("from-keyring".into()), Some("from-env".into()));
+        assert_eq!(got.as_deref(), Some("from-keyring"));
+    }
+
+    #[test]
+    fn env_used_when_keyring_absent_or_empty() {
+        assert_eq!(
+            resolve_api_key(None, Some("from-env".into())).as_deref(),
+            Some("from-env")
+        );
+        // a blank keyring entry must not shadow a real env key
+        assert_eq!(
+            resolve_api_key(Some(String::new()), Some("from-env".into())).as_deref(),
+            Some("from-env")
+        );
+    }
+
+    #[test]
+    fn no_key_anywhere_means_no_auth() {
+        assert_eq!(resolve_api_key(None, None), None);
+        assert_eq!(
+            resolve_api_key(Some(String::new()), Some(String::new())),
+            None
+        );
+        assert_eq!(resolve_api_key(None, Some(String::new())), None);
     }
 
     #[test]

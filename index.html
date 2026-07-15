@@ -56,9 +56,22 @@
             <input name="polish_model" type="text" placeholder="gpt-4o-mini" />
           </label>
           <label>
-            API key env var (leave blank for local servers without auth)
+            API key env var (fallback if no key is stored below; blank for local servers)
             <input name="polish_api_key_env" type="text" placeholder="OPENAI_API_KEY" />
           </label>
+          <label>
+            API key (stored in the OS keyring, never shown; blank + save clears it)
+            <input
+              name="polish_api_key"
+              type="password"
+              autocomplete="off"
+              placeholder="paste key, then Save key"
+            />
+          </label>
+          <div class="row">
+            <button type="button" id="save_key">Save key to keyring</button>
+            <span id="key_status"></span>
+          </div>
           <label class="row">
             <input name="per_app_tone" type="checkbox" />
             Adapt tone to the focused app
