@@ -433,6 +433,9 @@ This is a scaffold. Working / stubbed:
 - [x] Integration tests with a fake Aavaaz WS server + stub polish endpoint
 - [x] Per-app tone profiles configurable in UI
 - [x] API key stored in OS keyring (keyring-first, env var fallback)
+- [x] Start-at-login toggle (`tauri-plugin-autostart`)
+- [x] Release workflow: draft GitHub release with per-OS bundles on a `v*` tag
+- [ ] Ship `qol-trigger` in the packaged bundles (Wayland hotkey needs it)
 
 ## License
 
