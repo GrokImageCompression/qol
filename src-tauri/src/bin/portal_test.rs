@@ -24,13 +24,24 @@
 //! Wayland hotkey path works end-to-end and the qol integration just needs
 //! to wrap this same flow.
 
+// This tool drives the Linux-only xdg-desktop-portal (via ashpd, a Linux-only
+// dep), so it's a no-op on other platforms rather than a build break.
+#[cfg(not(target_os = "linux"))]
+fn main() {
+    eprintln!("portal_test is Linux-only (xdg-desktop-portal GlobalShortcuts).");
+}
+
+#[cfg(target_os = "linux")]
+use ashpd::desktop::global_shortcuts::{GlobalShortcuts, NewShortcut};
+#[cfg(target_os = "linux")]
+use futures_util::StreamExt;
+#[cfg(target_os = "linux")]
 use std::time::SystemTime;
 
-use ashpd::desktop::global_shortcuts::{GlobalShortcuts, NewShortcut};
-use futures_util::StreamExt;
-
+#[cfg(target_os = "linux")]
 const SHORTCUT_ID: &str = "qol-toggle";
 
+#[cfg(target_os = "linux")]
 #[tokio::main]
 async fn main() -> ashpd::Result<()> {
     tracing_subscriber::fmt()
