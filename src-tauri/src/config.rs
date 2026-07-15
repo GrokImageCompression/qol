@@ -30,6 +30,38 @@ pub struct PolishConfig {
     /// local servers (Ollama, llama.cpp) that don't require auth.
     pub api_key_env: String,
     pub per_app_tone: bool,
+    /// Ordered app→tone rules; first rule whose app token is a
+    /// case-insensitive substring of the focused app name wins.
+    #[serde(default = "default_tone_profiles")]
+    pub tone_profiles: Vec<ToneProfile>,
+    /// Tone used when no rule matches, or when `per_app_tone` is off.
+    #[serde(default = "default_tone")]
+    pub default_tone: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ToneProfile {
+    pub apps: Vec<String>,
+    pub tone: String,
+}
+
+fn default_tone_profiles() -> Vec<ToneProfile> {
+    let profile = |apps: &[&str], tone: &str| ToneProfile {
+        apps: apps.iter().map(|s| s.to_string()).collect(),
+        tone: tone.to_string(),
+    };
+    vec![
+        profile(&["slack", "discord", "telegram"], "casual chat"),
+        profile(
+            &["mail", "thunderbird", "outlook", "gmail"],
+            "professional email",
+        ),
+        profile(&["code", "vscode", "zed", "nvim"], "terse, code-friendly"),
+    ]
+}
+
+fn default_tone() -> String {
+    "natural prose".to_string()
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -52,6 +84,8 @@ impl Default for Config {
                 model: "gpt-4o-mini".into(),
                 api_key_env: "OPENAI_API_KEY".into(),
                 per_app_tone: true,
+                tone_profiles: default_tone_profiles(),
+                default_tone: default_tone(),
             },
             hotwords: vec![],
             inject_method: InjectMethod::Type,
@@ -122,6 +156,23 @@ mod tests {
         assert_eq!(json, "\"type\"");
         let json = serde_json::to_string(&InjectMethod::Paste).unwrap();
         assert_eq!(json, "\"paste\"");
+    }
+
+    #[test]
+    fn old_polish_config_without_tone_fields_gets_defaults() {
+        // A config written before tone_profiles/default_tone existed.
+        let json = r#"{
+            "aavaaz_url":"ws://localhost:9090","model":"m","language":"en",
+            "hotkey":"Super+Space","hotwords":[],"inject_method":"type",
+            "polish":{"enabled":true,"base_url":"u","model":"m",
+                      "api_key_env":"K","per_app_tone":true}
+        }"#;
+        let cfg: Config = serde_json::from_str(json).unwrap();
+        assert!(
+            !cfg.polish.tone_profiles.is_empty(),
+            "profiles default-filled"
+        );
+        assert_eq!(cfg.polish.default_tone, "natural prose");
     }
 
     #[test]

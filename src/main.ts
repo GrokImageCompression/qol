@@ -1,11 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 
+interface ToneProfile {
+  apps: string[];
+  tone: string;
+}
+
 interface PolishConfig {
   enabled: boolean;
   base_url: string;
   model: string;
   api_key_env: string;
   per_app_tone: boolean;
+  tone_profiles: ToneProfile[];
+  default_tone: string;
 }
 
 interface Config {
@@ -21,11 +28,59 @@ interface Config {
 const form = document.getElementById("settings") as HTMLFormElement;
 const status = document.getElementById("status") as HTMLParagraphElement;
 const testBtn = document.getElementById("test") as HTMLButtonElement;
+const toneRows = document.getElementById("tone_rows") as HTMLDivElement;
+const addToneBtn = document.getElementById("add_tone") as HTMLButtonElement;
 
 function setStatus(msg: string, ok = true) {
   status.textContent = msg;
   status.style.color = ok ? "" : "#d33";
 }
+
+function addToneRow(profile: ToneProfile = { apps: [], tone: "" }) {
+  const row = document.createElement("div");
+  row.className = "tone-row";
+
+  const apps = document.createElement("input");
+  apps.type = "text";
+  apps.className = "apps";
+  apps.placeholder = "slack, discord";
+  apps.value = profile.apps.join(", ");
+
+  const tone = document.createElement("input");
+  tone.type = "text";
+  tone.className = "tone";
+  tone.placeholder = "casual chat";
+  tone.value = profile.tone;
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "×";
+  remove.addEventListener("click", () => row.remove());
+
+  row.append(apps, tone, remove);
+  toneRows.append(row);
+}
+
+function renderToneProfiles(profiles: ToneProfile[]) {
+  toneRows.replaceChildren();
+  profiles.forEach((p) => addToneRow(p));
+}
+
+// A rule needs a tone and at least one app token; blank rows are dropped.
+function collectToneProfiles(): ToneProfile[] {
+  return [...toneRows.querySelectorAll(".tone-row")]
+    .map((row) => {
+      const apps = (row.querySelector(".apps") as HTMLInputElement).value
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const tone = (row.querySelector(".tone") as HTMLInputElement).value.trim();
+      return { apps, tone };
+    })
+    .filter((p) => p.tone && p.apps.length > 0);
+}
+
+addToneBtn.addEventListener("click", () => addToneRow());
 
 function fill(cfg: Config) {
   (form.elements.namedItem("aavaaz_url") as HTMLInputElement).value = cfg.aavaaz_url;
@@ -37,6 +92,8 @@ function fill(cfg: Config) {
   (form.elements.namedItem("polish_model") as HTMLInputElement).value = cfg.polish.model;
   (form.elements.namedItem("polish_api_key_env") as HTMLInputElement).value = cfg.polish.api_key_env;
   (form.elements.namedItem("per_app_tone") as HTMLInputElement).checked = cfg.polish.per_app_tone;
+  (form.elements.namedItem("default_tone") as HTMLInputElement).value = cfg.polish.default_tone;
+  renderToneProfiles(cfg.polish.tone_profiles);
   (form.elements.namedItem("hotwords") as HTMLInputElement).value = cfg.hotwords.join(", ");
 }
 
@@ -61,6 +118,8 @@ function collect(prev: Config): Config {
       model: data.get("polish_model") as string,
       api_key_env: data.get("polish_api_key_env") as string,
       per_app_tone: data.get("per_app_tone") === "on",
+      tone_profiles: collectToneProfiles(),
+      default_tone: (data.get("default_tone") as string).trim() || "natural prose",
     },
   };
 }

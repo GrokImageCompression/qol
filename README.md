@@ -364,12 +364,23 @@ Edit via the settings window (open from system tray), or directly at
     "base_url": "https://api.openai.com/v1",
     "model": "gpt-4o-mini",
     "api_key_env": "OPENAI_API_KEY",
-    "per_app_tone": true
+    "per_app_tone": true,
+    "tone_profiles": [
+      { "apps": ["slack", "discord", "telegram"], "tone": "casual chat" },
+      { "apps": ["mail", "thunderbird", "outlook", "gmail"], "tone": "professional email" },
+      { "apps": ["code", "vscode", "zed", "nvim"], "tone": "terse, code-friendly" }
+    ],
+    "default_tone": "natural prose"
   },
   "hotwords": ["Aavaaz", "qol", "WhisperLive"],
   "inject_method": "type"
 }
 ```
+
+Each `tone_profiles` rule matches when any of its `apps` tokens is a
+case-insensitive substring of the focused app name; the first matching rule
+wins, else `default_tone` applies. With `per_app_tone` off, `default_tone` is
+always used. Edit rules in the settings window or here directly.
 
 ## Tests & CI
 

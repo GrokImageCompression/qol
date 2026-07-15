@@ -63,6 +63,18 @@
             <input name="per_app_tone" type="checkbox" />
             Adapt tone to the focused app
           </label>
+
+          <div class="tone-profiles">
+            <div class="tone-head">
+              <span>Per-app tone rules</span>
+              <button type="button" id="add_tone">+ add rule</button>
+            </div>
+            <div id="tone_rows"></div>
+            <label>
+              Default tone (used when no rule matches)
+              <input name="default_tone" type="text" placeholder="natural prose" />
+            </label>
+          </div>
         </fieldset>
 
         <label>

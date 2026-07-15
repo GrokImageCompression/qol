@@ -135,27 +135,23 @@ pub async fn polish(
     }
 }
 
-/// Tone to steer polish with, honoring the per-app-tone toggle. With the
-/// toggle off, every app gets the neutral default regardless of focus.
-fn resolve_tone(cfg: &PolishConfig, app: Option<&str>) -> &'static str {
-    if cfg.per_app_tone {
-        tone_hint_for(app)
-    } else {
-        tone_hint_for(None)
-    }
-}
-
-fn tone_hint_for(app: Option<&str>) -> &'static str {
-    match app.map(str::to_ascii_lowercase).as_deref() {
-        Some("slack") | Some("discord") | Some("telegram") => "casual chat",
-        Some("mail") | Some("thunderbird") | Some("outlook") | Some("gmail") => {
-            "professional email"
+/// Tone to steer polish with, from the user's configured profiles. With the
+/// per-app toggle off (or no rule matching the focused app), falls back to the
+/// configured default tone. A rule matches when any of its app tokens is a
+/// case-insensitive substring of the focused app name.
+fn resolve_tone(cfg: &PolishConfig, app: Option<&str>) -> String {
+    if let (true, Some(name)) = (cfg.per_app_tone, app) {
+        let name = name.to_ascii_lowercase();
+        let matched = cfg.tone_profiles.iter().find(|p| {
+            p.apps
+                .iter()
+                .any(|a| !a.is_empty() && name.contains(&a.to_ascii_lowercase()))
+        });
+        if let Some(p) = matched {
+            return p.tone.clone();
         }
-        Some("code") | Some("code - oss") | Some("vscode") | Some("zed") | Some("nvim") => {
-            "terse, code-friendly"
-        }
-        _ => "natural prose",
     }
+    cfg.default_tone.clone()
 }
 
 fn build_system_prompt(tone_hint: &str, prior: &str) -> String {
@@ -186,7 +182,7 @@ async fn polish_inner(
 ) -> Result<String> {
     let prior = ctx.snapshot();
     let tone_hint = resolve_tone(cfg, app);
-    let system = build_system_prompt(tone_hint, &prior);
+    let system = build_system_prompt(&tone_hint, &prior);
 
     let body = ChatReq {
         model: &cfg.model,
@@ -300,7 +296,7 @@ mod tests {
             base_url,
             model: "test-model".into(),
             api_key_env: String::new(),
-            per_app_tone: true,
+            ..crate::config::Config::default().polish
         }
     }
 
@@ -427,11 +423,33 @@ mod tests {
 
     #[test]
     fn tone_hint_per_app() {
-        assert_eq!(tone_hint_for(Some("Slack")), "casual chat");
-        assert_eq!(tone_hint_for(Some("Thunderbird")), "professional email");
-        assert_eq!(tone_hint_for(Some("code - OSS")), "terse, code-friendly");
-        assert_eq!(tone_hint_for(Some("Firefox")), "natural prose");
-        assert_eq!(tone_hint_for(None), "natural prose");
+        // Default profiles, matched by case-insensitive substring.
+        let cfg = enabled_cfg("http://unused".into());
+        assert_eq!(resolve_tone(&cfg, Some("Slack")), "casual chat");
+        assert_eq!(
+            resolve_tone(&cfg, Some("Thunderbird")),
+            "professional email"
+        );
+        assert_eq!(
+            resolve_tone(&cfg, Some("Code - OSS")),
+            "terse, code-friendly"
+        );
+        assert_eq!(resolve_tone(&cfg, Some("Firefox")), "natural prose");
+        assert_eq!(resolve_tone(&cfg, None), "natural prose");
+    }
+
+    #[test]
+    fn tone_profiles_are_config_driven() {
+        let mut cfg = enabled_cfg("http://unused".into());
+        cfg.tone_profiles = vec![crate::config::ToneProfile {
+            apps: vec!["obsidian".into()],
+            tone: "terse notes".into(),
+        }];
+        cfg.default_tone = "plain".into();
+        // Substring match, focus name carries window title suffix.
+        assert_eq!(resolve_tone(&cfg, Some("Obsidian - vault")), "terse notes");
+        // No rule matches -> configured default, not the old hardcoded one.
+        assert_eq!(resolve_tone(&cfg, Some("Slack")), "plain");
     }
 
     #[test]
@@ -464,7 +482,7 @@ mod tests {
             base_url: "http://example.invalid".into(),
             model: "ignored".into(),
             api_key_env: "OPENAI_API_KEY".into(),
-            per_app_tone: true,
+            ..crate::config::Config::default().polish
         };
         let ctx = PolishContext::new();
         ctx.disable();
@@ -483,7 +501,7 @@ mod tests {
             base_url: "http://invalid.invalid".into(),
             model: "doesnt-matter".into(),
             api_key_env: "OPENAI_API_KEY".into(),
-            per_app_tone: true,
+            ..crate::config::Config::default().polish
         };
         let ctx = PolishContext::new();
         let out = tokio::runtime::Runtime::new().unwrap().block_on(polish(

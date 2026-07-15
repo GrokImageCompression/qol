@@ -171,6 +171,8 @@ mod tests {
                 model: String::new(),
                 api_key_env: String::new(),
                 per_app_tone: false,
+                tone_profiles: vec![],
+                default_tone: "natural prose".into(),
             },
             hotwords: vec!["alpha".into(), "bravo".into()],
             inject_method: InjectMethod::Type,
