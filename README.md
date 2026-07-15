@@ -432,8 +432,9 @@ This is a scaffold. Working / stubbed:
 - [x] Per-app tone profiles configurable in UI
 - [x] API key stored in OS keyring (keyring-first, env var fallback)
 - [x] Start-at-login toggle (`tauri-plugin-autostart`)
-- [x] Release workflow: draft GitHub release with per-OS bundles on a `v*` tag
+- [x] Release workflow: draft GitHub release with Linux bundles on a `v*` tag
 - [x] Wayland trigger folded into the `qol` binary (`qol toggle`), so packaged bundles carry it
+- [ ] macOS + Windows builds (unverified; CI is Linux-only for now) — Phase 5
 
 ## License
 
