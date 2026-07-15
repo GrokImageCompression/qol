@@ -76,9 +76,15 @@ jobs:
         working-directory: src-tauri
         run: |
           cargo clean
-          cargo build -v 2>&1 | grep -E "Running .*--crate-name qol " | tr ' ' '\n' | grep -E "crate-name|--edition|--extern|-L " | head -80 || true
-          echo "=== exit build ==="
-          cargo build 2>&1 | tail -30 || true
+          cargo build -v > /tmp/b.log 2>&1 || true
+          echo "=== qol rustc line present? ==="
+          grep -c -- "--crate-name qol " /tmp/b.log || true
+          echo "=== unique --extern flags on the qol invocation ==="
+          grep -- "--crate-name qol " /tmp/b.log | grep -oE -- "--extern [a-z_0-9]+" | sort -u || true
+          echo "=== rustc/cargo versions ==="
+          rustc -V; cargo -V; which rustc cargo
+          echo "=== serde crates in tree ==="
+          grep -oE "Compiling serde[a-z_]* v[0-9.]+" /tmp/b.log | sort -u || true
 
       # ──────────────── checks ────────────────
       - name: Rustfmt
