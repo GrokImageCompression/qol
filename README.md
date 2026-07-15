@@ -434,7 +434,9 @@ This is a scaffold. Working / stubbed:
 - [x] Start-at-login toggle (`tauri-plugin-autostart`)
 - [x] Release workflow: draft GitHub release with Linux bundles on a `v*` tag
 - [x] Wayland trigger folded into the `qol` binary (`qol toggle`), so packaged bundles carry it
-- [ ] macOS + Windows builds (unverified; CI is Linux-only for now) — Phase 5
+- [x] macOS build green in CI (`ubuntu` + `macos`)
+- [ ] macOS release bundles + on-hardware verification (audio, injection, Accessibility) — Phase 5
+- [ ] Windows build (blocked: `trigger.rs` is Unix-only) — Phase 5
 
 ## License
 
