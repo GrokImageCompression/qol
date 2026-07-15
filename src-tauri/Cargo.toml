@@ -1,6 +1,6 @@
 [package]
 name = "qol"
-version = "0.1.1"
+version = "0.1.2"
 description = "Voice dictation overlay powered by Aavaaz"
 authors = ["Aaron Boxer <boxerab@protonmail.com>"]
 edition = "2021"
