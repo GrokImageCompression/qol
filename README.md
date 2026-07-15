@@ -209,8 +209,8 @@ aavaaz serve --model distil-large-v3
 
 # in another — build and run qol
 cd ../../qol
-npm install
-npm run tauri dev
+pnpm install
+pnpm tauri dev
 ```
 
 Then press your hotkey (default `Super+Space`), speak, and release.
@@ -225,7 +225,7 @@ focused text field.
 
 ```bash
 cd ~/src/qol
-npm install
+pnpm install
 ( cd src-tauri && cargo build )
 ```
 
