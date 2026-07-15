@@ -135,6 +135,16 @@ pub async fn polish(
     }
 }
 
+/// Tone to steer polish with, honoring the per-app-tone toggle. With the
+/// toggle off, every app gets the neutral default regardless of focus.
+fn resolve_tone(cfg: &PolishConfig, app: Option<&str>) -> &'static str {
+    if cfg.per_app_tone {
+        tone_hint_for(app)
+    } else {
+        tone_hint_for(None)
+    }
+}
+
 fn tone_hint_for(app: Option<&str>) -> &'static str {
     match app.map(str::to_ascii_lowercase).as_deref() {
         Some("slack") | Some("discord") | Some("telegram") => "casual chat",
@@ -175,7 +185,7 @@ async fn polish_inner(
     ctx: &PolishContext,
 ) -> Result<String> {
     let prior = ctx.snapshot();
-    let tone_hint = tone_hint_for(app);
+    let tone_hint = resolve_tone(cfg, app);
     let system = build_system_prompt(tone_hint, &prior);
 
     let body = ChatReq {
@@ -399,6 +409,19 @@ mod tests {
         assert!(
             ["alpha", "bravo", "charlie", "delta", "echo"].contains(&first_word),
             "got partial word {first_word:?}"
+        );
+    }
+
+    #[test]
+    fn per_app_tone_toggle_gates_adaptation() {
+        let mut cfg = enabled_cfg("http://unused".into());
+        cfg.per_app_tone = true;
+        assert_eq!(resolve_tone(&cfg, Some("Slack")), "casual chat");
+        cfg.per_app_tone = false;
+        assert_eq!(
+            resolve_tone(&cfg, Some("Slack")),
+            "natural prose",
+            "toggle off must ignore the focused app"
         );
     }
 

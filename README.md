@@ -383,9 +383,11 @@ cargo fmt -- --check
 CI runs the above on **Ubuntu, macOS, and Windows** for every push and PR — see
 [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
-Hardware-bound paths (audio capture, keystroke injection) and network-bound
-paths (WebSocket session, Claude polish) aren't unit-tested yet; integration
-tests with a fake Aavaaz endpoint and a virtual audio device are a TODO.
+The network-bound paths are covered against in-process fakes: the Aavaaz
+WebSocket session (`transport.rs`) and the LLM polish pass (`polish.rs`,
+including failure/timeout/empty-response fallbacks). Hardware-bound paths
+(audio capture, keystroke injection) aren't tested yet; that needs a virtual
+audio device and a headless injection backend.
 
 ## Status
 
@@ -400,10 +402,10 @@ This is a scaffold. Working / stubbed:
 - [x] Global hotkey via `tauri-plugin-global-shortcut`
 - [x] Tray menu (open settings, pause/resume, quit)
 - [x] Settings UI
+- [x] Tone-rolling-context across segments (consistency in long dictation)
+- [x] Local-only polish via llama.cpp / Ollama (OpenAI-compatible `base_url`)
+- [x] Integration tests with a fake Aavaaz WS server + stub polish endpoint
 - [ ] Per-app tone profiles configurable in UI
-- [ ] Tone-rolling-context across segments (consistency in long dictation)
-- [ ] Local-only polish via llama.cpp
-- [ ] Integration tests with a fake Aavaaz WS server
 
 ## License
 
