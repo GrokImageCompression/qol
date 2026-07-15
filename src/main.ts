@@ -32,6 +32,7 @@ const toneRows = document.getElementById("tone_rows") as HTMLDivElement;
 const addToneBtn = document.getElementById("add_tone") as HTMLButtonElement;
 const saveKeyBtn = document.getElementById("save_key") as HTMLButtonElement;
 const keyStatus = document.getElementById("key_status") as HTMLSpanElement;
+const autostart = document.getElementById("autostart") as HTMLInputElement;
 const apiKeyInput = () => form.elements.namedItem("polish_api_key") as HTMLInputElement;
 const baseUrlInput = () => form.elements.namedItem("polish_base_url") as HTMLInputElement;
 
@@ -126,6 +127,18 @@ form.addEventListener("input", (e) => {
   }
 });
 
+// Autostart is OS state (login item), not part of config.json, so apply it
+// immediately and revert the checkbox if the OS call fails.
+autostart.addEventListener("change", async () => {
+  try {
+    await invoke("set_autostart", { enabled: autostart.checked });
+    setStatus(autostart.checked ? "Autostart enabled." : "Autostart disabled.");
+  } catch (err) {
+    autostart.checked = !autostart.checked;
+    setStatus(`Autostart change failed: ${err}`, false);
+  }
+});
+
 function fill(cfg: Config) {
   (form.elements.namedItem("aavaaz_url") as HTMLInputElement).value = cfg.aavaaz_url;
   (form.elements.namedItem("model") as HTMLSelectElement).value = cfg.model;
@@ -174,6 +187,7 @@ let current: Config;
   current = await invoke<Config>("get_config");
   fill(current);
   await refreshKeyStatus();
+  autostart.checked = await invoke<boolean>("get_autostart");
 })();
 
 form.addEventListener("submit", async (e) => {

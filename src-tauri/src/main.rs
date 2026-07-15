@@ -19,6 +19,7 @@ use std::sync::{Arc, OnceLock};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, RunEvent};
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
 
 use crate::config::Config;
@@ -214,7 +215,9 @@ fn main() {
             save_config,
             test_aavaaz,
             set_polish_api_key,
-            has_polish_api_key
+            has_polish_api_key,
+            get_autostart,
+            set_autostart
         ])
         .setup(|app| {
             {
@@ -323,6 +326,18 @@ fn set_polish_api_key(base_url: String, key: String) -> Result<(), String> {
 #[tauri::command]
 fn has_polish_api_key(base_url: String) -> bool {
     polish::keyring_get(&base_url).is_some()
+}
+
+/// Whether qol is registered to launch at login. OS state, not config.json.
+#[tauri::command]
+fn get_autostart(app: AppHandle) -> bool {
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+#[tauri::command]
+fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let mgr = app.autolaunch();
+    if enabled { mgr.enable() } else { mgr.disable() }.map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
