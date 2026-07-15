@@ -11,11 +11,14 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
-      # Linux-only for now. macOS and Windows are unverified and don't build
-      # green yet (Windows: Unix-only trigger.rs; macOS: build not yet
-      # working). Tracked as Phase 5 work.
+      # Windows omitted: the socket trigger (trigger.rs) is Unix-only, so the
+      # app doesn't compile there yet. Tracked as Phase 5 work.
       matrix:
         include:
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
           - platform: ubuntu-22.04
             args: ''
 
@@ -49,6 +52,8 @@ jobs:
           cache: pnpm
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - uses: Swatinem/rust-cache@v2
         with:
