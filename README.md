@@ -17,7 +17,7 @@ for filler removal, punctuation, and per-app tone.
 │  cpal             ──► 16 kHz mono PCM            │
 │  tokio-tungstenite──► ws://localhost:9090        │  ── Aavaaz/WhisperLive ──► transcript
 │  active-win       ──► focused app context        │
-│  Claude API       ──► polish (tone, punctuation) │
+│  OpenAI API       ──► polish (tone, punctuation) │
 │  enigo            ──► inject text into focused app│
 │                                                  │
 │  webview          ──► settings UI (Vite + TS)    │
@@ -34,7 +34,7 @@ for filler removal, punctuation, and per-app tone.
 | `src-tauri/src/transport.rs` | WebSocket session to Aavaaz/WhisperLive |
 | `src-tauri/src/session.rs` | Lifecycle: audio → transport → polish → inject |
 | `src-tauri/src/inject.rs` | Keystroke injection (enigo) + active-window probe |
-| `src-tauri/src/polish.rs` | Claude API call for transcript cleanup |
+| `src-tauri/src/polish.rs` | OpenAI-compatible polish call for transcript cleanup |
 | `src-tauri/src/config.rs` | JSON config in `~/.config/qol/config.json` |
 | `index.html` + `src/` | Vite settings UI |
 
