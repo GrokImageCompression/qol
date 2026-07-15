@@ -17,8 +17,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows omitted (Unix-only trigger.rs). macOS temporarily re-added to
-        # diagnose the deps-not-linked build failure.
+        # Windows omitted: the socket trigger (trigger.rs) is Unix-only, so the
+        # app doesn't compile there yet. Tracked as Phase 5 work.
         platform:
           - { os: ubuntu-latest, label: ubuntu }
           - { os: macos-latest,  label: macos }
@@ -68,23 +68,6 @@ jobs:
 
       - name: Build frontend
         run: pnpm run build
-
-      # TEMP diagnostic: capture the exact rustc invocation for the qol bin on
-      # macOS to see whether cargo omits the --extern flags for its deps.
-      - name: macos verbose diagnostic
-        if: matrix.platform.label == 'macos'
-        working-directory: src-tauri
-        run: |
-          cargo clean
-          cargo build -v > /tmp/b.log 2>&1 || true
-          echo "=== qol rustc line present? ==="
-          grep -c -- "--crate-name qol " /tmp/b.log || true
-          echo "=== unique --extern flags on the qol invocation ==="
-          grep -- "--crate-name qol " /tmp/b.log | grep -oE -- "--extern [a-z_0-9]+" | sort -u || true
-          echo "=== rustc/cargo versions ==="
-          rustc -V; cargo -V; which rustc cargo
-          echo "=== serde crates in tree ==="
-          grep -oE "Compiling serde[a-z_]* v[0-9.]+" /tmp/b.log | sort -u || true
 
       # ──────────────── checks ────────────────
       - name: Rustfmt
