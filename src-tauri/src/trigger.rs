@@ -1,9 +1,9 @@
 //! Unix-socket control channel for the qol daemon.
 //!
-//! Lets a tiny CLI (`qol-trigger`) start, stop, or toggle dictation by
+//! Lets the `qol <cmd>` CLI fast-path start, stop, or toggle dictation by
 //! writing one line to `$XDG_RUNTIME_DIR/qol.sock`. Used as the
 //! Wayland-on-GNOME workaround for hotkeys: GNOME Custom Shortcuts can
-//! invoke any command on keypress, so binding `qol-trigger toggle` to a
+//! invoke any command on keypress, so binding `qol toggle` to a
 //! key combo gives us a working trigger without needing the (broken for
 //! non-sandboxed apps) `xdg-desktop-portal` GlobalShortcuts path.
 //!
@@ -37,6 +37,25 @@ pub fn socket_path() -> PathBuf {
     }
     let uid = unsafe { libc::getuid() };
     PathBuf::from(format!("/tmp/qol-{uid}.sock"))
+}
+
+/// Synchronous one-shot client: connect to the running daemon's socket, send
+/// one command, and return the acknowledgement line. Used by the `qol <cmd>`
+/// CLI fast-path, which must not touch tokio or Tauri, so this deliberately
+/// uses blocking std sockets.
+pub fn send_command(cmd: &str) -> std::io::Result<String> {
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    let path = socket_path();
+    let mut stream = UnixStream::connect(&path)?;
+    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+    writeln!(stream, "{cmd}")?;
+    // Half-close so the server reads EOF and responds.
+    stream.shutdown(std::net::Shutdown::Write)?;
+    let mut resp = String::new();
+    stream.read_to_string(&mut resp)?;
+    Ok(resp.trim().to_string())
 }
 
 /// Dictation lifecycle handle the listener uses to drive sessions.

@@ -71,12 +71,6 @@ path = "src/main.rs"
 name = "portal_test"
 path = "src/bin/portal_test.rs"
 
-# Tiny CLI for the Wayland workaround — bind a GNOME / KDE custom
-# keybinding to `qol-trigger toggle` to start/stop dictation.
-[[bin]]
-name = "qol-trigger"
-path = "src/bin/qol_trigger.rs"
-
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

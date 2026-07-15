@@ -154,7 +154,7 @@ YDOTOOL_SOCKET=/tmp/.ydotool_socket ydotool type "hello"   # types into focused 
 qol picks the backend automatically at startup. Look for
 `selected injection backend = Ydotool` in the logs to confirm.
 
-### Wayland hotkey — use `qol-trigger` + GNOME Custom Shortcut
+### Wayland hotkey — use `qol <cmd>` + GNOME Custom Shortcut
 
 `tauri-plugin-global-shortcut` can't grab keys under GNOME Wayland (Mutter
 refuses the X11-style key grab), and the modern `xdg-desktop-portal`
@@ -166,40 +166,38 @@ gnome-control-center-global-shortcuts-provider:
   Discarded shortcut bind request from application with an invalid app_id ><.
 ```
 
-Workaround: qol always opens a Unix socket at `$XDG_RUNTIME_DIR/qol.sock`,
-and ships a tiny `qol-trigger` CLI that pokes it. Bind a GNOME Custom
-Shortcut to `qol-trigger toggle` and you get a working hotkey on Wayland:
+Workaround: the running app always opens a Unix socket at
+`$XDG_RUNTIME_DIR/qol.sock`, and the `qol` binary doubles as a client for it:
+`qol toggle` pokes the socket and exits without launching a second GUI. Bind a
+GNOME Custom Shortcut to it for a working Wayland hotkey:
 
-1. Install the CLI on your PATH:
-   ```bash
-   sudo install -m 755 src-tauri/target/debug/qol-trigger /usr/local/bin/qol-trigger
-   ```
-2. **Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts → +**
+1. **Settings → Keyboard → View and Customize Shortcuts → Custom Shortcuts → +**
    - **Name**: `qol toggle dictation`
-   - **Command**: `/usr/local/bin/qol-trigger toggle`
+   - **Command**: `qol toggle` (use the full path, e.g.
+     `/usr/bin/qol toggle`, if `qol` isn't on the shortcut's PATH)
    - **Shortcut**: pick your combo (e.g. `Ctrl+Alt+Space` — make sure
      nothing else has it; `Super+Space` is grabbed by GNOME's input-source
      switcher and won't reach the command)
-3. Start `qol` once so the socket exists, then press your combo. First
+2. Start `qol` once so the socket exists, then press your combo. First
    press starts dictation, second press stops it.
 
 Since GNOME custom keybindings only fire on press (no release event), the
 hotkey is **toggle**, not push-to-talk. Aavaaz's VAD finalizes segments
 naturally during dictation; toggling again ends the session.
 
-Other commands the CLI supports:
+Other subcommands:
 
 ```bash
-qol-trigger status     # prints "idle" or "recording"
-qol-trigger start      # idempotent
-qol-trigger stop       # idempotent
-qol-trigger toggle     # default
+qol status     # prints "idle" or "recording"
+qol start      # idempotent
+qol stop       # idempotent
+qol toggle     # start if idle, stop if recording
 ```
 
-The trigger socket is enabled on every OS, not just Linux, so the same
-CLI works from scripts on macOS and X11 too. On X11/macOS/Windows you
-also still have real push-to-talk through the in-process global-shortcut
-plugin — pick whichever feels better.
+The trigger socket is enabled on every OS, so these subcommands work from
+scripts on macOS and X11 too. On X11/macOS/Windows you also still have real
+push-to-talk through the in-process global-shortcut plugin — pick whichever
+feels better.
 
 ## Run
 
@@ -435,7 +433,7 @@ This is a scaffold. Working / stubbed:
 - [x] API key stored in OS keyring (keyring-first, env var fallback)
 - [x] Start-at-login toggle (`tauri-plugin-autostart`)
 - [x] Release workflow: draft GitHub release with per-OS bundles on a `v*` tag
-- [ ] Ship `qol-trigger` in the packaged bundles (Wayland hotkey needs it)
+- [x] Wayland trigger folded into the `qol` binary (`qol toggle`), so packaged bundles carry it
 
 ## License
 

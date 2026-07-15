@@ -140,7 +140,38 @@ const TRAY_OPEN: &str = "qol_open";
 const TRAY_PAUSE: &str = "qol_pause";
 const TRAY_QUIT: &str = "qol_quit";
 
+/// Handle `qol <toggle|start|stop|status>` as a socket client, returning the
+/// process exit code. Returns `None` for a normal (no-arg / GUI) launch so
+/// main() falls through to starting the app.
+fn try_cli_trigger() -> Option<i32> {
+    let cmd = match std::env::args().nth(1)?.to_ascii_lowercase().as_str() {
+        "toggle" => "TOGGLE",
+        "start" => "START",
+        "stop" => "STOP",
+        "status" => "STATUS",
+        _ => return None,
+    };
+    match trigger::send_command(cmd) {
+        Ok(line) => {
+            println!("{line}");
+            Some(if line.starts_with("ERR") { 3 } else { 0 })
+        }
+        Err(e) => {
+            eprintln!("qol: cannot reach daemon ({e}). Is qol running?");
+            Some(1)
+        }
+    }
+}
+
 fn main() {
+    // CLI fast-path: `qol toggle|start|stop|status` pokes the running daemon's
+    // socket and exits without launching the GUI. Bind a GNOME/KDE custom
+    // shortcut to the installed `qol` binary for a Wayland hotkey. Must run
+    // before any Tauri/single-instance init.
+    if let Some(code) = try_cli_trigger() {
+        std::process::exit(code);
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -159,7 +190,7 @@ fn main() {
         handle: OnceLock::new(),
     });
 
-    // Start the Unix-socket trigger listener (used by `qol-trigger` as the
+    // Start the Unix-socket trigger listener (used by `qol toggle` as the
     // Wayland-on-GNOME workaround for global hotkeys). Runs on every
     // platform — cheap, and useful even on X11 for scripting.
     {

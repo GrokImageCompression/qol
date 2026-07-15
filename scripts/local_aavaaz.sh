@@ -107,9 +107,9 @@ if ! [ -S "$XDG_RUNTIME_DIR/qol.sock" ]; then
     exit 1
 fi
 
-STATUS=$(qol-trigger status 2>&1)
+STATUS=$("$QOL_BIN" status 2>&1)
 if [[ "$STATUS" != STATUS* ]]; then
-    bad "qol-trigger can't reach daemon: $STATUS"
+    bad "qol status can't reach daemon: $STATUS"
     exit 1
 fi
 ok "qol up, daemon $STATUS"
