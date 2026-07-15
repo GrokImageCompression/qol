@@ -111,6 +111,10 @@ pub async fn polish(
         return raw.to_string();
     }
     match polish_inner(cfg, raw, app, ctx).await {
+        // An empty completion (no choices, or blank content) would silently
+        // drop the utterance. Keep the raw transcript instead; don't record
+        // the empty result in the rolling context.
+        Ok(out) if out.is_empty() => raw.to_string(),
         Ok(out) => {
             ctx.append(&out);
             out
@@ -191,7 +195,14 @@ async fn polish_inner(
     };
 
     let url = format!("{}/chat/completions", cfg.base_url.trim_end_matches('/'));
-    let mut req = reqwest::Client::new().post(&url).json(&body);
+    // Bound the round-trip so a hung endpoint can't wedge the collector on a
+    // single segment. On timeout reqwest errors, falling through to the raw
+    // transcript like any other polish failure.
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .context("build polish http client")?;
+    let mut req = client.post(&url).json(&body);
 
     // Bearer auth only if the configured env var is set. Lets local servers
     // (Ollama, llama.cpp) work with no key configured.
@@ -223,6 +234,122 @@ async fn polish_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    /// Spin up a one-shot HTTP server that reads a full request then replies
+    /// with `response`. Returns a `base_url` pointing at it. Draining the
+    /// request body before replying avoids an RST truncating reqwest's read.
+    async fn stub_openai(response: String) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                return;
+            };
+            let mut buf = Vec::new();
+            let mut tmp = [0u8; 1024];
+            let header_end = loop {
+                let n = match stream.read(&mut tmp).await {
+                    Ok(0) | Err(_) => return,
+                    Ok(n) => n,
+                };
+                buf.extend_from_slice(&tmp[..n]);
+                if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break pos + 4;
+                }
+            };
+            let headers = String::from_utf8_lossy(&buf[..header_end]).to_ascii_lowercase();
+            let content_len = headers
+                .lines()
+                .find_map(|l| l.strip_prefix("content-length:"))
+                .and_then(|v| v.trim().parse::<usize>().ok())
+                .unwrap_or(0);
+            while buf.len() < header_end + content_len {
+                match stream.read(&mut tmp).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => buf.extend_from_slice(&tmp[..n]),
+                }
+            }
+            let _ = stream.write_all(response.as_bytes()).await;
+            let _ = stream.flush().await;
+        });
+        format!("http://{addr}/v1")
+    }
+
+    fn http_response(status: &str, body: &str) -> String {
+        format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    fn enabled_cfg(base_url: String) -> PolishConfig {
+        PolishConfig {
+            enabled: true,
+            base_url,
+            model: "test-model".into(),
+            api_key_env: String::new(),
+            per_app_tone: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn success_returns_model_output_and_records_context() {
+        let body = r#"{"choices":[{"message":{"content":"  Cleaned up text.  "}}]}"#;
+        let cfg = enabled_cfg(stub_openai(http_response("200 OK", body)).await);
+        let ctx = PolishContext::new();
+        let out = polish(&cfg, "um cleaned up text", None, &ctx).await;
+        assert_eq!(out, "Cleaned up text.");
+        assert_eq!(ctx.snapshot(), "Cleaned up text.");
+        assert!(!ctx.is_disabled());
+    }
+
+    #[tokio::test]
+    async fn http_error_falls_back_to_raw_and_disables_session() {
+        let cfg = enabled_cfg(stub_openai(http_response("401 Unauthorized", "{}")).await);
+        let ctx = PolishContext::new();
+        let out = polish(&cfg, "raw words", None, &ctx).await;
+        assert_eq!(
+            out, "raw words",
+            "an API failure must not drop the transcript"
+        );
+        assert!(
+            ctx.is_disabled(),
+            "one failure disables polish for the session"
+        );
+        assert!(
+            ctx.snapshot().is_empty(),
+            "failed polish must not pollute context"
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_completion_falls_back_to_raw() {
+        // Both an empty choices list and blank content must keep the utterance.
+        for body in [
+            r#"{"choices":[]}"#,
+            r#"{"choices":[{"message":{"content":"   "}}]}"#,
+        ] {
+            let cfg = enabled_cfg(stub_openai(http_response("200 OK", body)).await);
+            let ctx = PolishContext::new();
+            let out = polish(&cfg, "keep this", None, &ctx).await;
+            assert_eq!(out, "keep this", "empty completion must not drop text");
+            assert!(
+                ctx.snapshot().is_empty(),
+                "empty output must not enter context"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_body_falls_back_to_raw() {
+        let cfg = enabled_cfg(stub_openai(http_response("200 OK", "this is not json")).await);
+        let ctx = PolishContext::new();
+        let out = polish(&cfg, "keep me", None, &ctx).await;
+        assert_eq!(out, "keep me");
+        assert!(ctx.is_disabled());
+    }
 
     #[test]
     fn context_starts_empty() {
