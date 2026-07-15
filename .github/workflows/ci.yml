@@ -17,10 +17,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Windows omitted: the socket trigger (trigger.rs) is Unix-only, so
+        # the app doesn't compile there yet. Tracked as Phase 5 work.
         platform:
           - { os: ubuntu-latest, label: ubuntu }
           - { os: macos-latest,  label: macos }
-          - { os: windows-latest, label: windows }
 
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +53,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - name: Cargo cache
