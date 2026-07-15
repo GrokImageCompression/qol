@@ -15,10 +15,10 @@ mod trigger;
 
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{Manager, RunEvent};
+use tauri::{AppHandle, Manager, RunEvent};
 use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
 
 use crate::config::Config;
@@ -27,11 +27,44 @@ use crate::session::Session;
 use crate::shortcut::parse_shortcut;
 use crate::trigger::DictationControl;
 
+const TRAY_ID: &str = "qol-tray";
+const TOOLTIP_IDLE: &str = "qol — voice dictation";
+const TOOLTIP_RECORDING: &str = "qol — recording";
+
 pub struct AppState {
     pub cfg: Mutex<Config>,
     pub injector: InjectorHandle,
     pub session: Mutex<Option<Session>>,
     pub paused: AtomicBool,
+    /// Set once during setup; used to drive the tray indicator and notifications.
+    pub handle: OnceLock<AppHandle>,
+}
+
+/// Swap the tray icon + tooltip to reflect whether we're capturing.
+fn set_recording_indicator(app: &AppHandle, recording: bool) {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return;
+    };
+    let bytes: &[u8] = if recording {
+        include_bytes!("../icons/tray-recording.png")
+    } else {
+        include_bytes!("../icons/tray.png")
+    };
+    if let Ok(img) = tauri::image::Image::from_bytes(bytes) {
+        let _ = tray.set_icon(Some(img));
+    }
+    // The recording dot is red; template mode would tint it away on macOS.
+    let _ = tray.set_icon_as_template(!recording);
+    let _ = tray.set_tooltip(Some(if recording {
+        TOOLTIP_RECORDING
+    } else {
+        TOOLTIP_IDLE
+    }));
+}
+
+fn notify(app: &AppHandle, title: &str, body: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app.notification().builder().title(title).body(body).show();
 }
 
 impl AppState {
@@ -41,14 +74,32 @@ impl AppState {
             return false;
         }
         let cfg = self.cfg.lock().clone();
-        match Session::start(cfg, self.injector.clone()) {
+        // On an unexpected transport end (e.g. Aavaaz unreachable), flip the
+        // indicator back to idle and tell the user. The stale session in the
+        // slot self-heals on the next start/stop toggle.
+        let on_end = {
+            let handle = self.handle.get().cloned();
+            Box::new(move |err: Option<String>| {
+                if let (Some(app), Some(msg)) = (handle, err) {
+                    set_recording_indicator(&app, false);
+                    notify(&app, "qol: dictation stopped", &msg);
+                }
+            })
+        };
+        match Session::start(cfg, self.injector.clone(), on_end) {
             Ok(sess) => {
                 tracing::info!("session started");
                 *slot = Some(sess);
+                if let Some(app) = self.handle.get() {
+                    set_recording_indicator(app, true);
+                }
                 true
             }
             Err(e) => {
                 tracing::error!(error = ?e, "session start failed");
+                if let Some(app) = self.handle.get() {
+                    notify(app, "qol: couldn't start dictation", &e.to_string());
+                }
                 false
             }
         }
@@ -58,6 +109,9 @@ impl AppState {
         let Some(sess) = self.session.lock().take() else {
             return false;
         };
+        if let Some(app) = self.handle.get() {
+            set_recording_indicator(app, false);
+        }
         tauri::async_runtime::spawn(async move {
             sess.stop().await;
             tracing::info!("session stopped");
@@ -101,6 +155,7 @@ fn main() {
         injector,
         session: Mutex::new(None),
         paused: AtomicBool::new(false),
+        handle: OnceLock::new(),
     });
 
     // Start the Unix-socket trigger listener (used by `qol-trigger` as the
@@ -160,14 +215,19 @@ fn main() {
             test_aavaaz
         ])
         .setup(|app| {
+            {
+                let handle = app.handle().clone();
+                let _ = app.state::<Arc<AppState>>().handle.set(handle);
+            }
+
             let open = MenuItem::with_id(app, TRAY_OPEN, "Open settings", true, None::<&str>)?;
             let pause = MenuItem::with_id(app, TRAY_PAUSE, "Pause dictation", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
             let quit = MenuItem::with_id(app, TRAY_QUIT, "Quit qol", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &pause, &sep, &quit])?;
 
-            let _tray = TrayIconBuilder::with_id("qol-tray")
-                .tooltip("qol — voice dictation")
+            let _tray = TrayIconBuilder::with_id(TRAY_ID)
+                .tooltip(TOOLTIP_IDLE)
                 .menu(&menu)
                 .show_menu_on_left_click(true)
                 .on_menu_event(move |app, event| match event.id().as_ref() {
@@ -234,4 +294,17 @@ async fn test_aavaaz(url: String) -> Result<String, String> {
         .await
         .map(|_| format!("connected to {url}"))
         .map_err(|e| format!("connect failed: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    // Both tray states must decode at runtime; set_recording_indicator relies
+    // on it, and the image-png feature + assets are easy to drop by accident.
+    #[test]
+    fn tray_icons_decode() {
+        assert!(tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png")).is_ok());
+        assert!(
+            tauri::image::Image::from_bytes(include_bytes!("../icons/tray-recording.png")).is_ok()
+        );
+    }
 }

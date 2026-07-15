@@ -412,11 +412,14 @@ This is a scaffold. Working / stubbed:
 - [x] Linux injection backend selector: `enigo` on X11, `ydotool` on Wayland
 - [x] Global hotkey via `tauri-plugin-global-shortcut`
 - [x] Tray menu (open settings, pause/resume, quit)
+- [x] Tray recording indicator (icon + tooltip change while capturing)
+- [x] Desktop notifications on start failure / backend drop
 - [x] Settings UI
 - [x] Tone-rolling-context across segments (consistency in long dictation)
 - [x] Local-only polish via llama.cpp / Ollama (OpenAI-compatible `base_url`)
 - [x] Integration tests with a fake Aavaaz WS server + stub polish endpoint
-- [ ] Per-app tone profiles configurable in UI
+- [x] Per-app tone profiles configurable in UI
+- [ ] API key stored in OS keyring instead of an env var
 
 ## License
 

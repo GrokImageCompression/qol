@@ -9,6 +9,11 @@ use crate::inject::{active_app_name, InjectorHandle};
 use crate::polish::{polish, PolishContext};
 use crate::transport::run_session;
 
+/// Called once when the transport task ends: `Some(msg)` on an unexpected
+/// failure (e.g. Aavaaz unreachable), `None` on a clean stop. Lets the caller
+/// surface backend errors to the UI without coupling `Session` to Tauri.
+pub type OnTransportEnd = Box<dyn FnOnce(Option<String>) + Send + 'static>;
+
 pub struct Session {
     audio_tx: mpsc::UnboundedSender<Vec<f32>>,
     _capture: CaptureHandle,
@@ -17,7 +22,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn start(cfg: Config, injector: InjectorHandle) -> Result<Self> {
+    pub fn start(cfg: Config, injector: InjectorHandle, on_end: OnTransportEnd) -> Result<Self> {
         let (audio_tx, audio_rx) = mpsc::unbounded_channel::<Vec<f32>>();
         let (seg_tx, mut seg_rx) = mpsc::unbounded_channel();
 
@@ -26,9 +31,14 @@ impl Session {
 
         let cfg_clone = cfg.clone();
         let transport = tokio::spawn(async move {
-            if let Err(e) = run_session(cfg_clone, audio_rx, seg_tx).await {
-                tracing::error!(error = ?e, "transport session ended");
-            }
+            let err = match run_session(cfg_clone, audio_rx, seg_tx).await {
+                Ok(()) => None,
+                Err(e) => {
+                    tracing::error!(error = ?e, "transport session ended");
+                    Some(e.to_string())
+                }
+            };
+            on_end(err);
         });
 
         let polish_cfg = cfg.polish.clone();
